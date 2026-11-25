@@ -170,7 +170,11 @@ async def _upload(
     dest: str,
 ) -> None:
     """Upload bytes through the SDK workspace API."""
-    await workspace.file_upload(data, dest)
+    result = await workspace.file_upload(data, dest)
+    if not result.success:
+        raise RuntimeError(
+            f"File upload to {dest} failed: {result.error or 'unknown error'}"
+        )
 
 
 async def upload_files(

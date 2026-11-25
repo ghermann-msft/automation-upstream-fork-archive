@@ -1576,6 +1576,31 @@ async def _execute_run(
         started: StartedConversation | None = None
         try:
             finish_dir = finish_plugin_dir(run_id)
+            try:
+                started = await backend.start_conversation(
+                    client, ctx, conversation_start
+                )
+            except ConversationStartUnavailable as exc:
+                # The sandbox's own agent server has no agent profiles.
+                if conversation_start.agent_profile_id is None:
+                    logger.warning(
+                        "conversation_start_fallback: %s",
+                        exc,
+                        extra=_log_ctx(sandbox_id=ctx.sandbox_id),
+                    )
+                    started = None
+                else:
+                    raise ConversationStartError(
+                        f"{exc}. Only the OpenHands API can launch agent profile "
+                        f"{conversation_start.agent_profile_id}.",
+                        status_code=exc.status_code,
+                        code="agent_profile_unsupported",
+                    ) from exc
+            if started is not None:
+                _check_launched_profile(started, conversation_start.agent_profile_id)
+            # Managed sandboxes may keep the Agent Server in deferred-init until
+            # the app server starts the conversation. Never write through the
+            # Agent Server before that initialization boundary.
             if not backend.is_local_mode and any(
                 p.get("source") == finish_dir for p in conversation_start.plugins
             ):
@@ -1589,31 +1614,6 @@ async def _execute_run(
                         transient=True,
                         code="finish_plugin_upload",
                     ) from exc
-            try:
-                started = await backend.start_conversation(
-                    client, ctx, conversation_start
-                )
-            except ConversationStartUnavailable as exc:
-                # The sandbox's own agent server has no agent profiles.
-                if conversation_start.agent_profile_id is None:
-                    raise
-                raise ConversationStartError(
-                    f"{exc}. Only the OpenHands API can launch agent profile "
-                    f"{conversation_start.agent_profile_id}.",
-                    status_code=exc.status_code,
-                    code="agent_profile_unsupported",
-                ) from exc
-            if started is not None:
-                _check_launched_profile(started, conversation_start.agent_profile_id)
-        except ConversationStartUnavailable as exc:
-            # An app server without this contract, and no profile requested:
-            # the runner creates the conversation as before.
-            logger.warning(
-                "conversation_start_fallback: %s",
-                exc,
-                extra=_log_ctx(sandbox_id=ctx.sandbox_id),
-            )
-            started = None
         except Exception as exc:
             logger.warning(
                 "Failed to start the run's conversation: %s",

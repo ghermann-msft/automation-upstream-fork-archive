@@ -790,7 +790,7 @@ class TestWhichRepositoriesTheRunnerClones:
 class TestExecuteRunStartsTheConversation:
     @pytest.fixture(autouse=True)
     def uploads(self):
-        """Writes into the sandbox; the finish plugin goes there first."""
+        """Writes the finish plugin after managed Agent Server initialization."""
         with patch(
             "openhands.automation.dispatcher.upload_files", new_callable=AsyncMock
         ) as upload:
@@ -1091,7 +1091,7 @@ class TestExecuteRunStartsTheConversation:
         assert env_vars["AUTOMATION_CONVERSATION_STARTED"] == "app_server"
 
     @patch("openhands.automation.dispatcher.execute_in_context", new_callable=AsyncMock)
-    async def test_the_finish_plugin_is_in_the_sandbox_before_the_start(
+    async def test_the_finish_plugin_is_uploaded_after_the_start_initializes_the_server(
         self, mock_execute, uploads, async_session_factory, mock_settings, mock_client
     ):
         run = await self._run(
@@ -1118,7 +1118,7 @@ class TestExecuteRunStartsTheConversation:
         with patch("openhands.automation.dispatcher.get_backend", return_value=backend):
             await _execute_run(run, mock_settings, async_session_factory, mock_client)
 
-        assert order == ["upload", "start"]
+        assert order == ["start", "upload"]
         agent_url, session_key, files = uploads.await_args.args
         assert (agent_url, session_key) == ("http://agent.test", "sk-1")
         assert files == finish_plugin_files(str(run.id))
@@ -1126,7 +1126,7 @@ class TestExecuteRunStartsTheConversation:
         assert start.plugins[0] == {"source": finish_plugin_dir(str(run.id))}
 
     @patch("openhands.automation.dispatcher.execute_in_context", new_callable=AsyncMock)
-    async def test_a_failed_plugin_write_fails_the_run_before_the_start(
+    async def test_a_failed_plugin_write_fails_the_run_after_initialization(
         self, mock_execute, uploads, async_session_factory, mock_settings, mock_client
     ):
         run = await self._run(
@@ -1139,7 +1139,7 @@ class TestExecuteRunStartsTheConversation:
         with patch("openhands.automation.dispatcher.get_backend", return_value=backend):
             await _execute_run(run, mock_settings, async_session_factory, mock_client)
 
-        backend.start_conversation.assert_not_awaited()
+        backend.start_conversation.assert_awaited_once()
         mock_execute.assert_not_awaited()
         backend.release_context.assert_awaited_once()
         reloaded = await self._reload(async_session_factory, run.id)

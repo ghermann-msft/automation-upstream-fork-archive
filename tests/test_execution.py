@@ -162,7 +162,9 @@ class TestUploadUsesSdkWorkspace:
     @pytest.mark.asyncio
     async def test_upload_delegates_to_sdk_workspace(self):
         workspace = MagicMock()
-        workspace.file_upload = AsyncMock()
+        workspace.file_upload = AsyncMock(
+            return_value=MagicMock(success=True, error=None)
+        )
 
         await _upload(
             workspace=workspace,
@@ -173,6 +175,23 @@ class TestUploadUsesSdkWorkspace:
         workspace.file_upload.assert_awaited_once_with(
             b"test data", "/tmp/automation.tar.gz"
         )
+
+    @pytest.mark.asyncio
+    async def test_upload_raises_when_sdk_reports_failure(self):
+        workspace = MagicMock()
+        workspace.file_upload = AsyncMock(
+            return_value=MagicMock(
+                success=False,
+                error="503: server is in deferred-init state 'dormant'",
+            )
+        )
+
+        with pytest.raises(RuntimeError, match="deferred-init state 'dormant'"):
+            await _upload(
+                workspace=workspace,
+                data=b"test data",
+                dest="/tmp/automation.tar.gz",
+            )
 
 
 class TestExecuteInContextErrors:
