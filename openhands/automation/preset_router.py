@@ -78,6 +78,7 @@ from openhands.automation.schemas import (
     RUN_AS_USER_ID_DESCRIPTION,
     VISIBILITY_DESCRIPTION,
     AutomationResponse,
+    ExecutionProfileId,
     PublicAutomationState,
     TemplateProvenance,
     Trigger,
@@ -218,9 +219,9 @@ class CreatePromptAutomationRequest(BaseModel):
             "cannot be combined with 'model'."
         ),
     )
-    execution_profile_id: uuid.UUID | None = Field(
+    execution_profile_id: ExecutionProfileId | None = Field(
         default=None,
-        description="Sandbox execution profile selected for this automation.",
+        description="Sandbox Server sandbox_spec_id selected for this automation.",
     )
 
     name: str = Field(..., min_length=1, max_length=500)
@@ -890,9 +891,9 @@ class CreatePluginAutomationRequest(BaseModel):
             "cannot be combined with 'model'."
         ),
     )
-    execution_profile_id: uuid.UUID | None = Field(
+    execution_profile_id: ExecutionProfileId | None = Field(
         default=None,
-        description="Sandbox execution profile selected for this automation.",
+        description="Sandbox Server sandbox_spec_id selected for this automation.",
     )
 
     name: str = Field(..., min_length=1, max_length=500)

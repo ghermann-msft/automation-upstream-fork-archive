@@ -911,12 +911,12 @@ class TestCreateAutomation:
         assert invalid.status_code == 422
 
     async def test_execution_profile_round_trip(self, async_client, local_mode):
-        selected, replacement = uuid.uuid4(), uuid.uuid4()
+        selected, replacement = "openhands-pool", "openhands-gpu-pool"
         response = await async_client.post(
             "/api/automation/v1",
             json={
                 "name": "Isolated reviewer",
-                "execution_profile_id": str(selected),
+                "execution_profile_id": selected,
                 "trigger": {"type": "cron", "schedule": "*/5 * * * *"},
                 "tarball_path": "s3://bucket/reviewer.tar.gz",
                 "entrypoint": "python3 main.py",
@@ -925,17 +925,34 @@ class TestCreateAutomation:
 
         assert response.status_code == 201
         path = "/api/automation/v1/" + response.json()["id"]
-        assert response.json()["execution_profile_id"] == str(selected)
+        assert response.json()["execution_profile_id"] == selected
 
         changed = await async_client.patch(
-            path, json={"execution_profile_id": str(replacement)}
+            path, json={"execution_profile_id": replacement}
         )
         assert changed.status_code == 200
-        assert changed.json()["execution_profile_id"] == str(replacement)
+        assert changed.json()["execution_profile_id"] == replacement
 
         cleared = await async_client.patch(path, json={"execution_profile_id": None})
         assert cleared.status_code == 200
         assert cleared.json()["execution_profile_id"] is None
+
+    @pytest.mark.parametrize("execution_profile_id", ["", "   ", 123])
+    async def test_execution_profile_rejects_invalid_values(
+        self, async_client, local_mode, execution_profile_id
+    ):
+        response = await async_client.post(
+            "/api/automation/v1",
+            json={
+                "name": "Invalid execution profile",
+                "execution_profile_id": execution_profile_id,
+                "trigger": {"type": "cron", "schedule": "*/5 * * * *"},
+                "tarball_path": "s3://bucket/reviewer.tar.gz",
+                "entrypoint": "python3 main.py",
+            },
+        )
+
+        assert response.status_code == 422
 
     async def test_create_automation_success(
         self, async_client, async_session, local_mode

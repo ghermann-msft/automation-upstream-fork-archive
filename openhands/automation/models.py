@@ -172,7 +172,7 @@ class Automation(Base):
     agent_profile_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
 
     # Sandbox execution profile (Sandbox Server sandbox_spec_id).
-    execution_profile_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    execution_profile_id: Mapped[str | None] = mapped_column(String, nullable=True)
 
     # Executable plugin-backed automation spec. When set, the dispatcher fetches
     # the plugin source at run time and packages it as the run tarball.

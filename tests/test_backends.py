@@ -401,7 +401,7 @@ class TestCloudSandboxBackend:
 
     @pytest.mark.asyncio
     async def test_create_sandbox_passes_execution_profile(self, mock_run):
-        execution_profile_id = uuid.uuid4()
+        execution_profile_id = "openhands-pool"
         seen_query = None
 
         def handler(request: httpx.Request) -> httpx.Response:
@@ -417,7 +417,7 @@ class TestCloudSandboxBackend:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             assert await backend._create_sandbox(client, {}) == "sb1"
 
-        assert seen_query == f"sandbox_spec_id={execution_profile_id}"
+        assert seen_query == "sandbox_spec_id=openhands-pool"
 
     @pytest.mark.asyncio
     async def test_create_sandbox_omits_execution_profile_when_unset(self, mock_run):
@@ -569,7 +569,7 @@ class TestGetBackend:
         assert backend.api_key == "local-key"
 
     def test_managed_mode_with_local_auth(self, monkeypatch, mock_run):
-        execution_profile_id = uuid.uuid4()
+        execution_profile_id = "openhands-pool"
         mock_run.automation.execution_profile_id = execution_profile_id
         monkeypatch.setenv("AUTOMATION_AGENT_SERVER_URL", "http://localhost:3000")
         monkeypatch.setenv("AUTOMATION_EXECUTION_BACKEND", "managed")

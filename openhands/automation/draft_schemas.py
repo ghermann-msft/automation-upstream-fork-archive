@@ -29,6 +29,7 @@ from openhands.automation.schemas import (
     AutomationState,
     CreateAutomationRequest,
     DraftEndpoint,
+    ExecutionProfileId,
     TemplateProvenance,
     normalize_automation_state_enabled,
     validate_command_string,
@@ -110,7 +111,7 @@ class _BaseDraftBody(BaseModel):
         default=None, description=VISIBILITY_DESCRIPTION
     )
     agent_profile_id: uuid.UUID | None = None
-    execution_profile_id: uuid.UUID | None = None
+    execution_profile_id: ExecutionProfileId | None = None
     name: str | None = Field(default=None, min_length=1, max_length=500)
     factory_id: uuid.UUID | None = Field(
         default=None, description=FACTORY_ID_DESCRIPTION

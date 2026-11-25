@@ -12,7 +12,9 @@ from pydantic import (
     ConfigDict,
     Discriminator,
     Field,
+    StringConstraints,
     Tag,
+    TypeAdapter,
     ValidationInfo,
     field_validator,
     model_validator,
@@ -73,6 +75,18 @@ _PATH_TRAVERSAL_RE = re.compile(r"(^|/)\.\.(/|$)")
 
 # Control characters (including newlines) collapsed out of run phase messages
 _PHASE_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]+")
+
+ExecutionProfileId = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1),
+]
+_EXECUTION_PROFILE_ID_ADAPTER = TypeAdapter(ExecutionProfileId)
+
+
+def validate_execution_profile_id(value: Any) -> str | None:
+    if value is None:
+        return None
+    return _EXECUTION_PROFILE_ID_ADAPTER.validate_python(value)
 
 
 class CronTrigger(BaseModel):
@@ -606,9 +620,9 @@ class CreateAutomationRequest(BaseModel):
         default=None,
         description="Agent profile selected for this automation.",
     )
-    execution_profile_id: uuid.UUID | None = Field(
+    execution_profile_id: ExecutionProfileId | None = Field(
         default=None,
-        description="Sandbox execution profile selected for this automation.",
+        description="Sandbox Server sandbox_spec_id selected for this automation.",
     )
 
     name: str = Field(..., min_length=1, max_length=500)
@@ -814,9 +828,9 @@ class UpdateAutomationRequest(BaseModel):
         default=None,
         description="Agent profile selected for this automation.",
     )
-    execution_profile_id: uuid.UUID | None = Field(
+    execution_profile_id: ExecutionProfileId | None = Field(
         default=None,
-        description="Sandbox execution profile selected for this automation.",
+        description="Sandbox Server sandbox_spec_id selected for this automation.",
     )
     visibility: AutomationVisibility | None = Field(
         default=None, description=VISIBILITY_DESCRIPTION
@@ -1358,7 +1372,7 @@ class TelemetryConsentResponse(BaseModel):
 
 class AutomationResponse(BaseModel):
     agent_profile_id: uuid.UUID | None = None
-    execution_profile_id: uuid.UUID | None = None
+    execution_profile_id: str | None = None
     id: uuid.UUID
     user_id: uuid.UUID
     run_as_kind: AutomationRunAsKind = AutomationRunAsKind.USER

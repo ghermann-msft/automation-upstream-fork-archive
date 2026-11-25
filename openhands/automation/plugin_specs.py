@@ -41,6 +41,7 @@ from openhands.automation.schemas import (
     RUN_AS_USER_ID_DESCRIPTION,
     VISIBILITY_DESCRIPTION,
     CronTrigger,
+    ExecutionProfileId,
     PublicAutomationState,
     TemplateProvenance,
     Trigger,
@@ -440,9 +441,9 @@ class CreatePluginSpecAutomationRequest(BaseModel):
             "its default_name."
         ),
     )
-    execution_profile_id: uuid.UUID | None = Field(
+    execution_profile_id: ExecutionProfileId | None = Field(
         default=None,
-        description="Sandbox execution profile selected for this automation.",
+        description="Sandbox Server sandbox_spec_id selected for this automation.",
     )
     observability_associations: dict[str, str] | None = None
     timeout: int | None = None

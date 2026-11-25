@@ -86,6 +86,7 @@ from openhands.automation.schemas import (
     Trigger,
     continue_conversation_keep_alive,
     validate_command_string,
+    validate_execution_profile_id,
 )
 from openhands.automation.storage import ObjectNotFoundError, get_file_store
 from openhands.automation.tags import normalize_tags
@@ -636,10 +637,8 @@ async def _validate_and_resolve_fields(
         if fields.get("agent_profile_id")
         else None
     )
-    execution_profile_id = (
-        uuid.UUID(fields["execution_profile_id"])
-        if fields.get("execution_profile_id")
-        else None
+    execution_profile_id = validate_execution_profile_id(
+        fields.get("execution_profile_id")
     )
     try:
         validate_agent_profile_selection(agent_profile_id, fields.get("model"))

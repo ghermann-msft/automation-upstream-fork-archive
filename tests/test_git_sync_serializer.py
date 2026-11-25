@@ -454,11 +454,11 @@ def test_profile_reference_survives_git_round_trip():
 
 
 def test_execution_profile_reference_survives_git_round_trip():
-    selected = uuid.uuid4()
+    selected = "openhands-pool"
     automation = _make_automation(execution_profile_id=selected)
     restored = deserialize_automation(serialize_automation(automation, None))
     assert restored is not None
-    assert restored.fields["execution_profile_id"] == str(selected)
+    assert restored.fields["execution_profile_id"] == selected
 
 
 def test_unset_execution_profile_is_omitted_from_git_metadata():

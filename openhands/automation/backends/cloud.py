@@ -9,7 +9,6 @@ import asyncio
 import json
 import logging
 import re
-import uuid
 from collections.abc import Awaitable, Callable, Collection
 from typing import TYPE_CHECKING, Any, TypeVar
 
@@ -227,7 +226,7 @@ class CloudSandboxBackend(ExecutionBackend):
         self,
         api_url: str,
         run: AutomationRun,
-        execution_profile_id: uuid.UUID | None = None,
+        execution_profile_id: str | None = None,
     ):
         """Initialize the Cloud sandbox backend for a specific run.
 
@@ -677,7 +676,7 @@ class CloudSandboxBackend(ExecutionBackend):
         @self._retry
         async def _do_create():
             params = (
-                {"sandbox_spec_id": str(self.execution_profile_id)}
+                {"sandbox_spec_id": self.execution_profile_id}
                 if self.execution_profile_id
                 else None
             )
