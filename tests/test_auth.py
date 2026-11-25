@@ -2,7 +2,7 @@
 
 import uuid
 from time import time
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import httpx
 import jwt
@@ -1587,13 +1587,24 @@ class TestLocalApiKeyAuthentication:
                 "X-Org-Id": str(TEST_ORG_ID),
             },
         )
-        response = MagicMock()
-        response.status_code = 200
-        response.json.return_value = {
-            **MOCK_USERS_ME_RESPONSE,
+        users_me_response = MagicMock()
+        users_me_response.status_code = 200
+        users_me_response.json.return_value = {
             "id": f"entra:{TRUSTED_IDENTITY_TENANT}:{TRUSTED_IDENTITY_SUBJECT}",
+            "email": None,
         }
-        mock_http_client.get = AsyncMock(return_value=response)
+        membership_user_id = uuid.uuid4()
+        membership_response = MagicMock()
+        membership_response.status_code = 200
+        membership_response.json.return_value = {
+            "user_id": str(membership_user_id),
+            "org_id": str(TEST_ORG_ID),
+            "role": "member",
+            "permissions": ["view_automations"],
+        }
+        mock_http_client.get = AsyncMock(
+            side_effect=[users_me_response, membership_response]
+        )
 
         with patch("openhands.automation.auth.get_config") as mock_get_config:
             mock_config = MagicMock()
@@ -1609,13 +1620,21 @@ class TestLocalApiKeyAuthentication:
         assert user.identity_provider == "entra"
         assert user.identity_tenant_id == TRUSTED_IDENTITY_TENANT
         assert user.identity_subject_id == TRUSTED_IDENTITY_SUBJECT
-        mock_http_client.get.assert_awaited_once_with(
-            "https://app.openhands.ai/api/v1/users/me",
-            headers={
-                "Authorization": "Bearer ohk_run_key",
-                "X-Org-Id": str(TEST_ORG_ID),
-            },
-        )
+        assert user.org_id == TEST_ORG_ID
+        assert user.role == "member"
+        assert user.permissions == ["view_automations"]
+        assert user.user_id != membership_user_id
+        headers = {
+            "Authorization": "Bearer ohk_run_key",
+            "X-Org-Id": str(TEST_ORG_ID),
+        }
+        assert mock_http_client.get.await_args_list == [
+            call("https://app.openhands.ai/api/v1/users/me", headers=headers),
+            call(
+                f"https://app.openhands.ai/api/organizations/{TEST_ORG_ID}/me",
+                headers=headers,
+            ),
+        ]
 
     async def test_managed_execution_rejects_malformed_canonical_user(
         self, mock_request, mock_http_client, local_mode_settings
@@ -1630,10 +1649,7 @@ class TestLocalApiKeyAuthentication:
         )
         response = MagicMock()
         response.status_code = 200
-        response.json.return_value = {
-            **MOCK_USERS_ME_RESPONSE,
-            "id": "entra:tenant-only",
-        }
+        response.json.return_value = {"id": "entra:tenant-only"}
         mock_http_client.get = AsyncMock(return_value=response)
 
         with patch("openhands.automation.auth.get_config") as mock_get_config:

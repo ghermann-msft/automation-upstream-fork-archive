@@ -218,6 +218,19 @@ def _trusted_identity_user_id(
     )
 
 
+def _canonical_identity_parts(user_id: str) -> tuple[str, str, str] | None:
+    """Parse a canonical external identity returned by Sandbox Server."""
+    if not user_id.startswith("entra:"):
+        return None
+    parts = user_id.split(":")
+    if len(parts) != 3 or not parts[1] or not parts[2]:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Invalid canonical user_id format from OpenHands API",
+        )
+    return parts[0], parts[1], parts[2]
+
+
 def _decode_trusted_identity_assertion(
     assertion: str,
 ) -> tuple[str, str, str]:
@@ -526,7 +539,11 @@ def upstream_auth_headers(request: Request) -> dict[str, str]:
 
 
 def _parse_users_me(
-    data: dict[str, Any], auth_method: AuthMethod, credential: str
+    data: dict[str, Any],
+    auth_method: AuthMethod,
+    credential: str,
+    *,
+    membership: _OrganizationMembership | None = None,
 ) -> AuthenticatedUser:
     """Build an AuthenticatedUser from the OpenHands /api/v1/users/me response.
 
@@ -542,29 +559,36 @@ def _parse_users_me(
             detail="Unexpected response shape from OpenHands API",
         )
 
-    if not parsed.id or not parsed.org_id:
+    if not parsed.id:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Could not determine user/org identity from OpenHands API",
+            detail="Could not determine user identity from OpenHands API",
         )
 
     identity_provider: str | None = None
     identity_tenant_id: str | None = None
     identity_subject_id: str | None = None
-    if parsed.id.startswith("entra:"):
-        parts = parsed.id.split(":")
-        if len(parts) != 3 or not parts[1] or not parts[2]:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail="Invalid canonical user_id format from OpenHands API",
-            )
-        identity_provider, identity_tenant_id, identity_subject_id = parts
+    if canonical_identity := _canonical_identity_parts(parsed.id):
+        identity_provider, identity_tenant_id, identity_subject_id = canonical_identity
         user_uuid = _trusted_identity_user_id(
             identity_provider,
             identity_tenant_id,
             identity_subject_id,
         )
+        if membership is None:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Canonical OpenHands identity requires organization membership",
+            )
+        org_uuid = membership.org_id
+        role = membership.role
+        permissions = membership.permissions
     else:
+        if not parsed.org_id:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Could not determine organization identity from OpenHands API",
+            )
         try:
             user_uuid = uuid.UUID(parsed.id)
         except ValueError:
@@ -572,13 +596,15 @@ def _parse_users_me(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail="Invalid user_id format from OpenHands API",
             )
-    try:
-        org_uuid = uuid.UUID(parsed.org_id)
-    except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Invalid org_id format from OpenHands API",
-        )
+        try:
+            org_uuid = uuid.UUID(parsed.org_id)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Invalid org_id format from OpenHands API",
+            )
+        role = parsed.role or ""
+        permissions = parsed.permissions or []
 
     # Upstream types email/role/permissions as nullable; AuthenticatedUser
     # requires non-null, so coalesce here (an authenticated automation user
@@ -588,8 +614,8 @@ def _parse_users_me(
         user_id=user_uuid,
         org_id=org_uuid,
         email=parsed.email or "",
-        role=parsed.role or "",
-        permissions=parsed.permissions or [],
+        role=role,
+        permissions=permissions,
         auth_method=auth_method,
         api_key=credential if auth_method == AuthMethod.API_KEY else None,
         model_profile_names=profiles.profile_names() if profiles else None,
@@ -771,6 +797,69 @@ async def authenticate_request(
         )
 
     # --- Build user and cache ---
-    user = _parse_users_me(resp.json(), auth_method, credential)
+    response_data = resp.json()
+    membership: _OrganizationMembership | None = None
+    response_id = response_data.get("id") if isinstance(response_data, dict) else None
+    if isinstance(response_id, str) and _canonical_identity_parts(response_id):
+        if x_org_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{X_ORG_ID_HEADER} is required for canonical identity auth",
+            )
+        try:
+            membership_resp = await _make_auth_request_with_retry(
+                client,
+                f"{settings.openhands_api_base_url}/api/organizations/{x_org_id}/me",
+                headers=outbound_headers,
+            )
+        except httpx.RequestError as e:
+            logger.error("Failed to reach organization authority: %s", e)
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Failed to reach organization authority",
+            ) from e
+        if membership_resp.status_code == 401:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired API key",
+            )
+        if membership_resp.status_code == 403:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized for requested organization",
+            )
+        if membership_resp.status_code == 429:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Rate limited by organization authority",
+            )
+        if membership_resp.status_code != 200:
+            logger.error(
+                "Unexpected status from organization authority: %s",
+                membership_resp.status_code,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Unexpected response from organization authority",
+            )
+        try:
+            membership = _OrganizationMembership.model_validate(membership_resp.json())
+        except ValidationError as e:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Unexpected response shape from organization authority",
+            ) from e
+        if str(membership.org_id) != x_org_id:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Organization authority returned the wrong organization",
+            )
+
+    user = _parse_users_me(
+        response_data,
+        auth_method,
+        credential,
+        membership=membership,
+    )
     auth_cache[cache_key] = user
     return _store_authenticated_user(request, user)
