@@ -30,5 +30,10 @@ WORK_DIR = "/workspace/project"
 # DO NOT CHANGE: Would break tarball extraction in running sandboxes.
 TARBALL_PATH = "/tmp/automation.tar.gz"
 
+# Port exposed by the Agent Server inside a managed OpenHands sandbox.
+# OpenHandsCloudWorkspace(local_agent_server_mode=True) reads this from
+# AGENT_SERVER_PORT; its SDK default is not the managed runtime contract.
+MANAGED_AGENT_SERVER_PORT = 8000
+
 # model profile names mirror the agent-server profile-store constraints.
 MODEL_PROFILE_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"

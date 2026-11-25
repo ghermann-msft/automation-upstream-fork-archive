@@ -672,6 +672,7 @@ class TestPrivateEnvironmentInjection:
         assert agent_url.encode() not in env_bytes
         assert api_key.encode() in env_bytes
         assert b"AGENT_SERVER_URL=" not in env_bytes
+        assert b"AGENT_SERVER_PORT=8000" in env_bytes
         assert b"AUTOMATION_CALLBACK_API_KEY=" in env_bytes
 
     @pytest.mark.asyncio

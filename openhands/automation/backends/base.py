@@ -139,7 +139,8 @@ class ExecutionBackend(ABC):
     def build_env_vars(self) -> dict[str, str]:
         """Build environment variables to inject into the execution environment.
 
-        For Cloud mode: OPENHANDS_API_KEY, OPENHANDS_CLOUD_API_URL
+        For Cloud mode: OPENHANDS_API_KEY, OPENHANDS_CLOUD_API_URL,
+        AGENT_SERVER_PORT
         For Local mode: AGENT_SERVER_URL, SESSION_API_KEY
         Both set AUTOMATION_RUN_MODE (``cloud`` / ``local``) for the presets.
 

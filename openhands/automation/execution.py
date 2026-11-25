@@ -24,7 +24,7 @@ from tenacity import (
 )
 
 from openhands.automation.config import get_config
-from openhands.automation.constants import TARBALL_PATH
+from openhands.automation.constants import MANAGED_AGENT_SERVER_PORT, TARBALL_PATH
 from openhands.automation.exceptions import PermanentDispatchError, TarballNotFoundError
 from openhands.automation.utils import log_extra
 from openhands.automation.utils.sandbox import delete_sandbox, find_agent_server_url
@@ -517,10 +517,11 @@ async def run_automation(
     *env_vars* are exported before the setup script and the entrypoint run,
     so setup can consume injected values such as ``AUTOMATION_API_URL``.
     The sandbox identity env vars (``SANDBOX_ID``, ``SESSION_API_KEY``,
-    ``AUTOMATION_CALLBACK_API_KEY``) are **always** injected so the SDK's
-    ``local_agent_server_mode`` works and scripts can sign their completion
-    callback, along with ``AUTOMATION_RUN_MODE=cloud``. ``AGENT_SERVER_URL``
-    is not: stored scripts read it as running on a local Agent Canvas.
+    ``AGENT_SERVER_PORT``, ``AUTOMATION_CALLBACK_API_KEY``) are **always**
+    injected so the SDK's ``local_agent_server_mode`` reaches the managed
+    Agent Server and scripts can sign their completion callback, along with
+    ``AUTOMATION_RUN_MODE=cloud``. ``AGENT_SERVER_URL`` is not: stored scripts
+    read it as running on a local Agent Canvas.
     If *callback_url* / *run_id* are set they are injected as
     ``AUTOMATION_CALLBACK_URL`` / ``AUTOMATION_RUN_ID`` so the SDK's
     ``OpenHandsCloudWorkspace`` can POST completion status on exit.
@@ -571,6 +572,7 @@ async def run_automation(
             # get_llm() / get_secrets() inside the sandbox.
             env_vars.setdefault("SANDBOX_ID", sandbox_id)
             env_vars.setdefault("SESSION_API_KEY", session_key)
+            env_vars.setdefault("AGENT_SERVER_PORT", str(MANAGED_AGENT_SERVER_PORT))
             # The per-run API key used for callbacks is the same one the SDK
             # authenticates with. AGENT_SERVER_URL is not exported: scripts
             # read it as running on a local Agent Canvas.

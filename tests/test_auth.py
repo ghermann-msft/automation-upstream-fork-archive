@@ -1242,6 +1242,7 @@ class TestTrustedIdentityAuthentication:
     def local_mode_settings(self):
         settings = MagicMock()
         settings.is_local_mode = True
+        settings.uses_local_execution = True
         settings.local_api_key = "test-local-api-key"
         settings.openhands_api_base_url = "http://sandbox-server:3000"
         settings.trusted_identity_assertion_header = TRUSTED_IDENTITY_HEADER
@@ -1463,6 +1464,7 @@ class TestLocalApiKeyAuthentication:
         """Create mock settings for local mode with local_api_key configured."""
         settings = MagicMock()
         settings.is_local_mode = True
+        settings.uses_local_execution = True
         settings.local_api_key = "test-local-api-key"
         settings.openhands_api_base_url = "https://app.openhands.ai"
         return settings
@@ -1472,6 +1474,7 @@ class TestLocalApiKeyAuthentication:
         """Create mock settings for non-local (SaaS) mode."""
         settings = MagicMock()
         settings.is_local_mode = False
+        settings.uses_local_execution = False
         settings.local_api_key = ""
         settings.openhands_api_base_url = "https://app.openhands.ai"
         return settings
@@ -1481,6 +1484,7 @@ class TestLocalApiKeyAuthentication:
         """Create mock settings for local mode without local_api_key configured."""
         settings = MagicMock()
         settings.is_local_mode = True
+        settings.uses_local_execution = True
         settings.local_api_key = ""
         settings.openhands_api_base_url = "https://app.openhands.ai"
         return settings
@@ -1511,6 +1515,22 @@ class TestLocalApiKeyAuthentication:
             expected_org_id = uuid.uuid5(uuid.NAMESPACE_DNS, "openhands-local-org")
             assert user.user_id == expected_user_id
             assert user.org_id == expected_org_id
+
+    async def test_managed_execution_still_accepts_local_api_key(
+        self, mock_request, mock_http_client, local_mode_settings
+    ):
+        local_mode_settings.uses_local_execution = False
+        _set_mock_headers(mock_request, {"Authorization": "Bearer test-local-api-key"})
+
+        with patch("openhands.automation.auth.get_config") as mock_get_config:
+            mock_config = MagicMock()
+            mock_config.service = local_mode_settings
+            mock_get_config.return_value = mock_config
+
+            user = await authenticate_request(mock_request, client=mock_http_client)
+
+        assert user.auth_method == AuthMethod.LOCAL_API_KEY
+        mock_http_client.get.assert_not_called()
 
     async def test_local_api_key_mismatch_raises_401(
         self, mock_request, mock_http_client, local_mode_settings
@@ -1554,6 +1574,78 @@ class TestLocalApiKeyAuthentication:
             mock_http_client.get.assert_called_once()
             assert user.email == "test@example.com"
             assert user.auth_method == AuthMethod.API_KEY
+
+    async def test_managed_run_key_maps_to_canonical_callback_owner(
+        self, mock_request, mock_http_client, local_mode_settings
+    ):
+        """Managed execution keeps local auth and accepts run-scoped ohk keys."""
+        local_mode_settings.uses_local_execution = False
+        _set_mock_headers(
+            mock_request,
+            {
+                "Authorization": "Bearer ohk_run_key",
+                "X-Org-Id": str(TEST_ORG_ID),
+            },
+        )
+        response = MagicMock()
+        response.status_code = 200
+        response.json.return_value = {
+            **MOCK_USERS_ME_RESPONSE,
+            "id": f"entra:{TRUSTED_IDENTITY_TENANT}:{TRUSTED_IDENTITY_SUBJECT}",
+        }
+        mock_http_client.get = AsyncMock(return_value=response)
+
+        with patch("openhands.automation.auth.get_config") as mock_get_config:
+            mock_config = MagicMock()
+            mock_config.service = local_mode_settings
+            mock_get_config.return_value = mock_config
+
+            user = await authenticate_request(mock_request, client=mock_http_client)
+
+        assert user.user_id == uuid.uuid5(
+            uuid.UUID("7aa6df4c-9243-4bad-8933-7863e0412d5c"),
+            f"entra\0{TRUSTED_IDENTITY_TENANT}\0{TRUSTED_IDENTITY_SUBJECT}",
+        )
+        assert user.identity_provider == "entra"
+        assert user.identity_tenant_id == TRUSTED_IDENTITY_TENANT
+        assert user.identity_subject_id == TRUSTED_IDENTITY_SUBJECT
+        mock_http_client.get.assert_awaited_once_with(
+            "https://app.openhands.ai/api/v1/users/me",
+            headers={
+                "Authorization": "Bearer ohk_run_key",
+                "X-Org-Id": str(TEST_ORG_ID),
+            },
+        )
+
+    async def test_managed_execution_rejects_malformed_canonical_user(
+        self, mock_request, mock_http_client, local_mode_settings
+    ):
+        local_mode_settings.uses_local_execution = False
+        _set_mock_headers(
+            mock_request,
+            {
+                "Authorization": "Bearer ohk_run_key",
+                "X-Org-Id": str(TEST_ORG_ID),
+            },
+        )
+        response = MagicMock()
+        response.status_code = 200
+        response.json.return_value = {
+            **MOCK_USERS_ME_RESPONSE,
+            "id": "entra:tenant-only",
+        }
+        mock_http_client.get = AsyncMock(return_value=response)
+
+        with patch("openhands.automation.auth.get_config") as mock_get_config:
+            mock_config = MagicMock()
+            mock_config.service = local_mode_settings
+            mock_get_config.return_value = mock_config
+
+            with pytest.raises(HTTPException) as exc_info:
+                await authenticate_request(mock_request, client=mock_http_client)
+
+        assert exc_info.value.status_code == 502
+        assert "canonical user_id" in exc_info.value.detail
 
     async def test_non_local_mode_uses_saas_auth(
         self, mock_request, mock_http_client, non_local_mode_settings

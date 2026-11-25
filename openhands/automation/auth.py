@@ -548,13 +548,36 @@ def _parse_users_me(
             detail="Could not determine user/org identity from OpenHands API",
         )
 
+    identity_provider: str | None = None
+    identity_tenant_id: str | None = None
+    identity_subject_id: str | None = None
+    if parsed.id.startswith("entra:"):
+        parts = parsed.id.split(":")
+        if len(parts) != 3 or not parts[1] or not parts[2]:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Invalid canonical user_id format from OpenHands API",
+            )
+        identity_provider, identity_tenant_id, identity_subject_id = parts
+        user_uuid = _trusted_identity_user_id(
+            identity_provider,
+            identity_tenant_id,
+            identity_subject_id,
+        )
+    else:
+        try:
+            user_uuid = uuid.UUID(parsed.id)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Invalid user_id format from OpenHands API",
+            )
     try:
-        user_uuid = uuid.UUID(parsed.id)
         org_uuid = uuid.UUID(parsed.org_id)
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Invalid user_id or org_id format from OpenHands API",
+            detail="Invalid org_id format from OpenHands API",
         )
 
     # Upstream types email/role/permissions as nullable; AuthenticatedUser
@@ -571,6 +594,9 @@ def _parse_users_me(
         api_key=credential if auth_method == AuthMethod.API_KEY else None,
         model_profile_names=profiles.profile_names() if profiles else None,
         active_model_profile_name=profiles.active if profiles else None,
+        identity_provider=identity_provider,
+        identity_tenant_id=identity_tenant_id,
+        identity_subject_id=identity_subject_id,
     )
 
 
@@ -687,10 +713,11 @@ async def authenticate_request(
         if secrets.compare_digest(api_key, settings.local_api_key):
             logger.debug("Authenticated via local API key")
             return _store_authenticated_user(request, _get_local_user())
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid API key",
-        )
+        if settings.uses_local_execution:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid API key",
+            )
 
     # --- Resolve credential (API key or cookie) ---
     credential, auth_method = _extract_credential(request)

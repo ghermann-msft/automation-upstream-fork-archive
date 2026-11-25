@@ -1598,6 +1598,7 @@ class TestExecuteRunPhaseReporting:
         env_vars = mock_execute.await_args.kwargs["env_vars"]
         assert env_vars["AUTOMATION_RUN_MODE"] == "cloud"
         assert "AGENT_SERVER_URL" not in env_vars
+        assert env_vars["AGENT_SERVER_PORT"] == "8000"
         assert env_vars["SANDBOX_ID"] == "sbx-1"
         assert env_vars["SESSION_API_KEY"] == "sk-1"
         assert env_vars["OPENHANDS_API_KEY"] == "cloud-api-key"

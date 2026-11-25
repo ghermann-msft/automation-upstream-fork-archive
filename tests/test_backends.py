@@ -467,6 +467,7 @@ class TestCloudSandboxBackend:
             assert env_vars == {
                 "OPENHANDS_API_KEY": "sk-user",
                 "OPENHANDS_CLOUD_API_URL": "https://app.all-hands.dev",
+                "AGENT_SERVER_PORT": "8000",
                 "AUTOMATION_RUN_MODE": "cloud",
             }
 
