@@ -72,6 +72,28 @@ class TestServiceSettings:
 
         assert settings.failure_disable_threshold == 0
 
+    def test_trusted_identity_settings_reuse_sandbox_environment(self, monkeypatch):
+        monkeypatch.setenv("OH_TRUSTED_IDENTITY_ASSERTION_SECRET", "shared-secret")
+        monkeypatch.setenv("OH_TRUSTED_IDENTITY_ASSERTION_ISSUER", "halo-bff")
+        monkeypatch.setenv("OH_TRUSTED_IDENTITY_ASSERTION_AUDIENCE", "sandbox-server")
+        monkeypatch.setenv("OH_TRUSTED_IDENTITY_ASSERTION_HEADER", "X-Halo-Identity")
+
+        settings = ServiceSettings()
+
+        assert settings.trusted_identity_assertions_enabled is True
+        assert settings.trusted_identity_assertion_secret == "shared-secret"
+        assert settings.trusted_identity_assertion_issuer == "halo-bff"
+        assert settings.trusted_identity_assertion_audience == "sandbox-server"
+        assert settings.trusted_identity_assertion_header == "X-Halo-Identity"
+
+    def test_partial_trusted_identity_settings_are_rejected(self, monkeypatch):
+        monkeypatch.delenv("OH_TRUSTED_IDENTITY_ASSERTION_ISSUER", raising=False)
+        monkeypatch.delenv("OH_TRUSTED_IDENTITY_ASSERTION_AUDIENCE", raising=False)
+        monkeypatch.setenv("OH_TRUSTED_IDENTITY_ASSERTION_SECRET", "shared-secret")
+
+        with pytest.raises(ValidationError, match="must be configured together"):
+            ServiceSettings()
+
 
 class TestBasePath:
     """Verify base_path is derived from base_url path + /api/automation."""

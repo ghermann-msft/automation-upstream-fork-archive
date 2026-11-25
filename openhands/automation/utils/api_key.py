@@ -29,8 +29,9 @@ class APIKeyError(Exception):
 async def get_api_key_for_automation_run(run: "AutomationRun") -> str:
     """Get an API key for executing an automation run.
 
-    Creates a temporary API key for the user/org associated with the
-    automation run by calling the OpenHands SaaS service API.
+    Retrieves a run-scoped API key for the identity and organization associated
+    with the automation run. Canonical external identities are resolved by
+    Sandbox Server; legacy owners use the existing UUID-based service route.
 
     Args:
         run: The automation run to get an API key for. Must have its
@@ -53,17 +54,31 @@ async def get_api_key_for_automation_run(run: "AutomationRun") -> str:
     user_id = run.automation.user_id
     org_id = run.automation.org_id
 
-    url = (
-        f"{settings.openhands_api_base_url}/api/service/users/{user_id}"
-        f"/orgs/{org_id}/api-keys"
-    )
+    identity_provider = run.automation.run_as_identity_provider
+    tenant_id = run.automation.run_as_identity_tenant_id
+    subject_id = run.automation.run_as_identity_subject_id
+    if any((identity_provider, tenant_id, subject_id)):
+        if not all((identity_provider, tenant_id, subject_id)):
+            raise APIKeyError("Automation run-as identity is incomplete")
+        url = f"{settings.openhands_api_base_url}/api/service/automation/api-keys"
+        payload = {
+            "identity_provider": identity_provider,
+            "tenant_id": tenant_id,
+            "subject_id": subject_id,
+            "organization_id": str(org_id),
+            "run_id": str(run.id),
+        }
+    else:
+        url = (
+            f"{settings.openhands_api_base_url}/api/service/users/{user_id}"
+            f"/orgs/{org_id}/api-keys"
+        )
+        payload = {"name": "automation"}
 
     headers = {
         "X-Service-API-Key": settings.service_key,
         "Content-Type": "application/json",
     }
-
-    payload = {"name": "automation"}
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -77,7 +92,7 @@ async def get_api_key_for_automation_run(run: "AutomationRun") -> str:
                 raise APIKeyError(f"API key not found in response: {list(data.keys())}")
 
             logger.info(
-                "Created API key for automation run %s (user=%s, org=%s)",
+                "Retrieved API key for automation run %s (user=%s, org=%s)",
                 run.id,
                 user_id,
                 org_id,

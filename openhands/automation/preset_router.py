@@ -779,6 +779,9 @@ async def create_automation_from_prompt(
         automation = Automation(
             user_id=run_as.user_id,
             run_as_kind=run_as.kind,
+            run_as_identity_provider=run_as.identity_provider,
+            run_as_identity_tenant_id=run_as.identity_tenant_id,
+            run_as_identity_subject_id=run_as.identity_subject_id,
             created_by_user_id=user.user_id,
             visibility=body.visibility,
             org_id=user.org_id,
@@ -1369,6 +1372,9 @@ async def create_automation_from_plugin(
         automation = Automation(
             user_id=run_as.user_id,
             run_as_kind=run_as.kind,
+            run_as_identity_provider=run_as.identity_provider,
+            run_as_identity_tenant_id=run_as.identity_tenant_id,
+            run_as_identity_subject_id=run_as.identity_subject_id,
             created_by_user_id=user.user_id,
             visibility=body.visibility,
             org_id=user.org_id,

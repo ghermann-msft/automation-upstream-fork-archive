@@ -183,6 +183,9 @@ async def apply_git_sync_config_override(
     updates: dict[str, Any],
     *,
     configured_by_user_id: uuid.UUID,
+    configured_by_identity_provider: str | None = None,
+    configured_by_identity_tenant_id: str | None = None,
+    configured_by_identity_subject_id: str | None = None,
 ) -> None:
     """Persist partial overrides for the org, keyed by `GitSyncSettings` field.
 
@@ -235,6 +238,9 @@ async def apply_git_sync_config_override(
         )
     row.overrides = json.dumps(encrypt_secret_fields(overrides))
     row.configured_by_user_id = configured_by_user_id
+    row.configured_by_identity_provider = configured_by_identity_provider
+    row.configured_by_identity_tenant_id = configured_by_identity_tenant_id
+    row.configured_by_identity_subject_id = configured_by_identity_subject_id
 
 
 def _normalize_repo_url(url: str) -> str:

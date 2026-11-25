@@ -1,9 +1,11 @@
 """Tests for authentication module."""
 
 import uuid
+from time import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
+import jwt
 import pytest
 from cachetools import TTLCache
 from fastapi import HTTPException
@@ -18,6 +20,7 @@ from openhands.automation.auth import (
     authenticate_request,
     clear_auth_cache,
     require_permission,
+    upstream_auth_headers,
 )
 from openhands.automation.config import get_config
 from openhands.automation.db import get_session
@@ -40,6 +43,13 @@ MOCK_USERS_ME_RESPONSE = {
         "manage_automations",
     ],
 }
+
+TRUSTED_IDENTITY_HEADER = "X-OpenHands-Identity-Assertion"
+TRUSTED_IDENTITY_SECRET = "test-trusted-identity-secret"
+TRUSTED_IDENTITY_ISSUER = "openhands-halo-bff"
+TRUSTED_IDENTITY_AUDIENCE = "openhands-sandbox-server"
+TRUSTED_IDENTITY_TENANT = "tenant-1"
+TRUSTED_IDENTITY_SUBJECT = "object-1"
 
 
 @pytest.fixture(autouse=True)
@@ -1225,6 +1235,224 @@ class TestRequirePermission:
             await checker(request=MagicMock(), user=user)
 
         assert exc_info.value.status_code == 403
+
+
+class TestTrustedIdentityAuthentication:
+    @pytest.fixture
+    def local_mode_settings(self):
+        settings = MagicMock()
+        settings.is_local_mode = True
+        settings.local_api_key = "test-local-api-key"
+        settings.openhands_api_base_url = "http://sandbox-server:3000"
+        settings.trusted_identity_assertion_header = TRUSTED_IDENTITY_HEADER
+        settings.trusted_identity_assertion_secret = TRUSTED_IDENTITY_SECRET
+        settings.trusted_identity_assertion_issuer = TRUSTED_IDENTITY_ISSUER
+        settings.trusted_identity_assertion_audience = TRUSTED_IDENTITY_AUDIENCE
+        settings.trusted_identity_assertion_clock_skew_seconds = 0
+        settings.trusted_identity_assertion_max_lifetime_seconds = 300
+        settings.trusted_identity_assertions_enabled = True
+        return settings
+
+    @pytest.fixture
+    def assertion(self):
+        now = int(time())
+        return jwt.encode(
+            {
+                "oid": TRUSTED_IDENTITY_SUBJECT,
+                "tid": TRUSTED_IDENTITY_TENANT,
+                "sub": TRUSTED_IDENTITY_SUBJECT,
+                "iss": TRUSTED_IDENTITY_ISSUER,
+                "aud": TRUSTED_IDENTITY_AUDIENCE,
+                "iat": now,
+                "exp": now + 60,
+            },
+            TRUSTED_IDENTITY_SECRET,
+            algorithm="HS256",
+            headers={"typ": "JWT"},
+        )
+
+    @staticmethod
+    def _membership_response(
+        *,
+        status_code: int = 200,
+        org_id: uuid.UUID = TEST_ORG_ID,
+    ) -> MagicMock:
+        response = MagicMock()
+        response.status_code = status_code
+        response.json.return_value = {
+            "user_id": str(uuid.uuid4()),
+            "org_id": str(org_id),
+            "role": "owner",
+            "permissions": ["view_automations", "manage_automations"],
+        }
+        return response
+
+    async def test_trusted_identity_takes_precedence_over_local_session_key(
+        self, mock_request, mock_http_client, local_mode_settings, assertion
+    ):
+        _set_mock_headers(
+            mock_request,
+            {
+                TRUSTED_IDENTITY_HEADER: assertion,
+                "X-Session-API-Key": "test-local-api-key",
+                "X-Org-Id": str(TEST_ORG_ID),
+            },
+        )
+        mock_http_client.get = AsyncMock(return_value=self._membership_response())
+
+        with patch("openhands.automation.auth.get_config") as mock_get_config:
+            mock_config = MagicMock()
+            mock_config.service = local_mode_settings
+            mock_get_config.return_value = mock_config
+
+            user = await authenticate_request(mock_request, client=mock_http_client)
+
+        expected_user_id = uuid.uuid5(
+            uuid.UUID("7aa6df4c-9243-4bad-8933-7863e0412d5c"),
+            f"entra\0{TRUSTED_IDENTITY_TENANT}\0{TRUSTED_IDENTITY_SUBJECT}",
+        )
+        assert user.user_id == expected_user_id
+        assert user.org_id == TEST_ORG_ID
+        assert user.auth_method == AuthMethod.TRUSTED_IDENTITY
+        assert user.identity_provider == "entra"
+        assert user.identity_tenant_id == TRUSTED_IDENTITY_TENANT
+        assert user.identity_subject_id == TRUSTED_IDENTITY_SUBJECT
+        mock_http_client.get.assert_awaited_once_with(
+            f"http://sandbox-server:3000/api/organizations/{TEST_ORG_ID}/me",
+            headers={
+                TRUSTED_IDENTITY_HEADER: assertion,
+                "X-Org-Id": str(TEST_ORG_ID),
+            },
+        )
+
+    async def test_trusted_identity_requires_org_header(
+        self, mock_request, mock_http_client, local_mode_settings, assertion
+    ):
+        _set_mock_headers(
+            mock_request,
+            {
+                TRUSTED_IDENTITY_HEADER: assertion,
+                "X-Session-API-Key": "test-local-api-key",
+            },
+        )
+
+        with patch("openhands.automation.auth.get_config") as mock_get_config:
+            mock_config = MagicMock()
+            mock_config.service = local_mode_settings
+            mock_get_config.return_value = mock_config
+
+            with pytest.raises(HTTPException) as exc_info:
+                await authenticate_request(mock_request, client=mock_http_client)
+
+        assert exc_info.value.status_code == 400
+        assert "X-Org-Id is required" in exc_info.value.detail
+        mock_http_client.get.assert_not_called()
+
+    async def test_invalid_assertion_fails_before_local_key_fallback(
+        self, mock_request, mock_http_client, local_mode_settings, assertion
+    ):
+        _set_mock_headers(
+            mock_request,
+            {
+                TRUSTED_IDENTITY_HEADER: f"{assertion}invalid",
+                "X-Session-API-Key": "test-local-api-key",
+                "X-Org-Id": str(TEST_ORG_ID),
+            },
+        )
+
+        with patch("openhands.automation.auth.get_config") as mock_get_config:
+            mock_config = MagicMock()
+            mock_config.service = local_mode_settings
+            mock_get_config.return_value = mock_config
+
+            with pytest.raises(HTTPException) as exc_info:
+                await authenticate_request(mock_request, client=mock_http_client)
+
+        assert exc_info.value.status_code == 401
+        mock_http_client.get.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("authority_status", "expected_status"),
+        [(401, 401), (403, 403), (404, 502)],
+    )
+    async def test_trusted_identity_authority_failures_fail_closed(
+        self,
+        mock_request,
+        mock_http_client,
+        local_mode_settings,
+        assertion,
+        authority_status,
+        expected_status,
+    ):
+        _set_mock_headers(
+            mock_request,
+            {
+                TRUSTED_IDENTITY_HEADER: assertion,
+                "X-Session-API-Key": "test-local-api-key",
+                "X-Org-Id": str(TEST_ORG_ID),
+            },
+        )
+        mock_http_client.get = AsyncMock(
+            return_value=self._membership_response(status_code=authority_status)
+        )
+
+        with patch("openhands.automation.auth.get_config") as mock_get_config:
+            mock_config = MagicMock()
+            mock_config.service = local_mode_settings
+            mock_get_config.return_value = mock_config
+
+            with pytest.raises(HTTPException) as exc_info:
+                await authenticate_request(mock_request, client=mock_http_client)
+
+        assert exc_info.value.status_code == expected_status
+
+    async def test_trusted_identity_rejects_mismatched_org_response(
+        self, mock_request, mock_http_client, local_mode_settings, assertion
+    ):
+        _set_mock_headers(
+            mock_request,
+            {
+                TRUSTED_IDENTITY_HEADER: assertion,
+                "X-Session-API-Key": "test-local-api-key",
+                "X-Org-Id": str(TEST_ORG_ID),
+            },
+        )
+        mock_http_client.get = AsyncMock(
+            return_value=self._membership_response(org_id=uuid.uuid4())
+        )
+
+        with patch("openhands.automation.auth.get_config") as mock_get_config:
+            mock_config = MagicMock()
+            mock_config.service = local_mode_settings
+            mock_get_config.return_value = mock_config
+
+            with pytest.raises(HTTPException) as exc_info:
+                await authenticate_request(mock_request, client=mock_http_client)
+
+        assert exc_info.value.status_code == 502
+        assert "wrong organization" in exc_info.value.detail
+
+    def test_upstream_headers_forward_assertion_instead_of_session_key(
+        self, mock_request, local_mode_settings, assertion
+    ):
+        _set_mock_headers(
+            mock_request,
+            {
+                TRUSTED_IDENTITY_HEADER: assertion,
+                "X-Session-API-Key": "test-local-api-key",
+                "X-Org-Id": str(TEST_ORG_ID),
+            },
+        )
+
+        with patch("openhands.automation.auth.get_config") as mock_get_config:
+            mock_config = MagicMock()
+            mock_config.service = local_mode_settings
+            mock_get_config.return_value = mock_config
+
+            assert upstream_auth_headers(mock_request) == {
+                TRUSTED_IDENTITY_HEADER: assertion,
+                "X-Org-Id": str(TEST_ORG_ID),
+            }
 
 
 class TestLocalApiKeyAuthentication:

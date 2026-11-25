@@ -31,6 +31,9 @@ class ResolvedRunAs:
 
     user_id: uuid.UUID
     kind: AutomationRunAsKind
+    identity_provider: str | None = None
+    identity_tenant_id: str | None = None
+    identity_subject_id: str | None = None
 
 
 async def resolve_run_as(
@@ -56,7 +59,13 @@ async def resolve_run_as(
     """
     refuse_service_account(user)
     if run_as_user_id is None:
-        return ResolvedRunAs(user.user_id, AutomationRunAsKind.USER)
+        return ResolvedRunAs(
+            user.user_id,
+            AutomationRunAsKind.USER,
+            user.identity_provider,
+            user.identity_tenant_id,
+            user.identity_subject_id,
+        )
 
     require_run_as_permission(
         user, "Only admins and owners can create an automation for a service account"

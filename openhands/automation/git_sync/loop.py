@@ -332,6 +332,9 @@ class _Owner(NamedTuple):
 
     user_id: uuid.UUID
     org_id: uuid.UUID
+    identity_provider: str | None = None
+    identity_tenant_id: str | None = None
+    identity_subject_id: str | None = None
 
 
 def _import_owner(org_config: AutomationGitSyncOrgConfig) -> _Owner | None:
@@ -346,7 +349,13 @@ def _import_owner(org_config: AutomationGitSyncOrgConfig) -> _Owner | None:
     owner and update as usual.
     """
     if org_config.configured_by_user_id is not None:
-        return _Owner(org_config.configured_by_user_id, org_config.org_id)
+        return _Owner(
+            org_config.configured_by_user_id,
+            org_config.org_id,
+            org_config.configured_by_identity_provider,
+            org_config.configured_by_identity_tenant_id,
+            org_config.configured_by_identity_subject_id,
+        )
     if get_config().service.is_local_mode:
         local = _get_local_user()
         return _Owner(local.user_id, local.org_id)
@@ -723,6 +732,9 @@ async def _create_automation_from_git(
     # run-as identity.
     automation = Automation(
         user_id=owner.user_id,
+        run_as_identity_provider=owner.identity_provider,
+        run_as_identity_tenant_id=owner.identity_tenant_id,
+        run_as_identity_subject_id=owner.identity_subject_id,
         created_by_user_id=owner.user_id,
         org_id=owner.org_id,
         **values,

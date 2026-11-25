@@ -165,7 +165,13 @@ async def update_git_sync_config(
 
     try:
         await apply_git_sync_config_override(
-            session, user.org_id, mapped, configured_by_user_id=user.user_id
+            session,
+            user.org_id,
+            mapped,
+            configured_by_user_id=user.user_id,
+            configured_by_identity_provider=user.identity_provider,
+            configured_by_identity_tenant_id=user.identity_tenant_id,
+            configured_by_identity_subject_id=user.identity_subject_id,
         )
     except GitSyncSecretStoreError as e:
         # Refusing the write is the point: storing the token unencrypted would

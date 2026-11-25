@@ -5733,6 +5733,29 @@ class TestCreateAsServiceAccount:
         assert response.json()["created_by_user_id"] == str(TEST_USER_ID)
         assert enterprise_api.requests == []
 
+    async def test_canonical_caller_identity_is_persisted_for_dispatch(
+        self,
+        async_client,
+        async_session,
+        mock_authenticated_user,
+    ):
+        mock_authenticated_user.identity_provider = "entra"
+        mock_authenticated_user.identity_tenant_id = "tenant-1"
+        mock_authenticated_user.identity_subject_id = "object-1"
+        body = self._body()
+        del body["run_as_user_id"]
+
+        response = await async_client.post("/api/automation/v1", json=body)
+
+        assert response.status_code == 201
+        automation = await async_session.get(
+            Automation, uuid.UUID(response.json()["id"])
+        )
+        assert automation is not None
+        assert automation.run_as_identity_provider == "entra"
+        assert automation.run_as_identity_tenant_id == "tenant-1"
+        assert automation.run_as_identity_subject_id == "object-1"
+
     async def test_create_as_sa_without_manage_returns_403(
         self, readonly_client, async_session
     ):

@@ -603,6 +603,21 @@ class ServiceSettings(BaseSettings):
 
         # Auth
         AUTOMATION_SERVICE_KEY: Service key for SaaS API (required in cloud mode)
+        AUTOMATION_TRUSTED_IDENTITY_ASSERTION_HEADER: Header carrying a trusted
+            identity assertion from an authenticated ingress. Defaults to
+            OH_TRUSTED_IDENTITY_ASSERTION_HEADER when set, otherwise
+            X-OpenHands-Identity-Assertion.
+        AUTOMATION_TRUSTED_IDENTITY_ASSERTION_SECRET: HS256 secret for validating
+            trusted identity assertions. Defaults to
+            OH_TRUSTED_IDENTITY_ASSERTION_SECRET.
+        AUTOMATION_TRUSTED_IDENTITY_ASSERTION_ISSUER: Required assertion issuer.
+            Defaults to OH_TRUSTED_IDENTITY_ASSERTION_ISSUER.
+        AUTOMATION_TRUSTED_IDENTITY_ASSERTION_AUDIENCE: Required assertion
+            audience. Defaults to OH_TRUSTED_IDENTITY_ASSERTION_AUDIENCE.
+        AUTOMATION_TRUSTED_IDENTITY_ASSERTION_MAX_LIFETIME_SECONDS: Maximum
+            assertion lifetime (default: OH setting or 300).
+        AUTOMATION_TRUSTED_IDENTITY_ASSERTION_CLOCK_SKEW_SECONDS: Allowed clock
+            skew (default: OH setting or 30).
         AUTOMATION_FACTORY_TOKEN_TTL_SECONDS: Lifetime of the factory run token
             (default: 86400, the shared contract's 24 hours). Keep it above the
             longest possible run, or the token expires mid-run.
@@ -740,6 +755,36 @@ class ServiceSettings(BaseSettings):
     # API keys (called by the dispatcher before each automation run).
     # Required in cloud mode, not needed in local mode.
     service_key: str = ""
+    trusted_identity_assertion_header: str = Field(
+        default_factory=lambda: os.getenv(
+            "OH_TRUSTED_IDENTITY_ASSERTION_HEADER",
+            "X-OpenHands-Identity-Assertion",
+        )
+    )
+    trusted_identity_assertion_secret: str = Field(
+        default_factory=lambda: os.getenv("OH_TRUSTED_IDENTITY_ASSERTION_SECRET", "")
+    )
+    trusted_identity_assertion_issuer: str = Field(
+        default_factory=lambda: os.getenv("OH_TRUSTED_IDENTITY_ASSERTION_ISSUER", "")
+    )
+    trusted_identity_assertion_audience: str = Field(
+        default_factory=lambda: os.getenv("OH_TRUSTED_IDENTITY_ASSERTION_AUDIENCE", "")
+    )
+    trusted_identity_assertion_max_lifetime_seconds: int = Field(
+        default_factory=lambda: int(
+            os.getenv(
+                "OH_TRUSTED_IDENTITY_ASSERTION_MAX_LIFETIME_SECONDS",
+                "300",
+            )
+        ),
+        ge=0,
+    )
+    trusted_identity_assertion_clock_skew_seconds: int = Field(
+        default_factory=lambda: int(
+            os.getenv("OH_TRUSTED_IDENTITY_ASSERTION_CLOCK_SKEW_SECONDS", "30")
+        ),
+        ge=0,
+    )
 
     # Lifetime of AUTOMATION_FACTORY_TOKEN. Enterprise checks only `exp`, so
     # this can change without a contract change.
@@ -787,7 +832,30 @@ class ServiceSettings(BaseSettings):
             raise ValueError(
                 "agent_server_url is required when execution_backend is local"
             )
+        self.trusted_identity_assertion_header = (
+            self.trusted_identity_assertion_header.strip()
+        )
+        if not self.trusted_identity_assertion_header:
+            raise ValueError("trusted_identity_assertion_header must not be empty")
+        identity_settings = (
+            self.trusted_identity_assertion_secret,
+            self.trusted_identity_assertion_issuer,
+            self.trusted_identity_assertion_audience,
+        )
+        if any(identity_settings) and not all(identity_settings):
+            raise ValueError(
+                "trusted identity assertion secret, issuer, and audience "
+                "must be configured together"
+            )
         return self
+
+    @property
+    def trusted_identity_assertions_enabled(self) -> bool:
+        return bool(
+            self.trusted_identity_assertion_secret
+            and self.trusted_identity_assertion_issuer
+            and self.trusted_identity_assertion_audience
+        )
 
     @property
     def is_local_mode(self) -> bool:

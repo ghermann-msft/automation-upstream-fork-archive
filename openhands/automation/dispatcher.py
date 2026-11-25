@@ -1294,7 +1294,7 @@ async def _execute_run(
     callback_url = f"{settings.resolved_base_url.rstrip('/')}/v1/runs/{run_id}/complete"
     env_vars = backend.build_env_vars()
     env_vars.update(automation_env_metadata(automation, run))
-    if settings.is_local_mode:
+    if settings.is_local_mode and not automation.run_as_identity_provider:
         # Every local installation owns its rows as the same placeholder user
         # (auth._get_local_user), so attribute conversations to the
         # installation instead; never forward the shared placeholder.

@@ -320,6 +320,9 @@ async def create_automation(
     auto = Automation(
         user_id=run_as.user_id,
         run_as_kind=run_as.kind,
+        run_as_identity_provider=run_as.identity_provider,
+        run_as_identity_tenant_id=run_as.identity_tenant_id,
+        run_as_identity_subject_id=run_as.identity_subject_id,
         created_by_user_id=user.user_id,
         visibility=body.visibility,
         org_id=user.org_id,
@@ -428,6 +431,9 @@ async def create_automation_from_plugin_spec(
     automation = Automation(
         user_id=run_as.user_id,
         run_as_kind=run_as.kind,
+        run_as_identity_provider=run_as.identity_provider,
+        run_as_identity_tenant_id=run_as.identity_tenant_id,
+        run_as_identity_subject_id=run_as.identity_subject_id,
         created_by_user_id=user.user_id,
         visibility=body.visibility,
         org_id=user.org_id,
@@ -1467,7 +1473,13 @@ async def change_run_as(
     # request so its audit row reads as one run-as change.
     set_audit_actor(session, AuditActor.from_user(user), action="run_as_change")
     if body.to == "self":
-        new_run_as = ResolvedRunAs(user.user_id, AutomationRunAsKind.USER)
+        new_run_as = ResolvedRunAs(
+            user.user_id,
+            AutomationRunAsKind.USER,
+            user.identity_provider,
+            user.identity_tenant_id,
+            user.identity_subject_id,
+        )
     else:
         assert body.service_account_id is not None  # guaranteed by the schema
         new_run_as = ResolvedRunAs(body.service_account_id, AutomationRunAsKind.SERVICE)
@@ -1522,6 +1534,9 @@ async def change_run_as(
     disabled_detail = {"reason": "run_as_changed", "source": "run_as_change"}
     auto.user_id = new_run_as.user_id
     auto.run_as_kind = new_run_as.kind
+    auto.run_as_identity_provider = new_run_as.identity_provider
+    auto.run_as_identity_tenant_id = new_run_as.identity_tenant_id
+    auto.run_as_identity_subject_id = new_run_as.identity_subject_id
     if new_run_as.kind == AutomationRunAsKind.SERVICE:
         # A service account's automations are visible to the organization.
         auto.visibility = AutomationVisibility.ORGANIZATION

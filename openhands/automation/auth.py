@@ -1,14 +1,16 @@
 """Authentication for the automations service API.
 
-Supports three authentication methods (checked in order):
-1. API key via Authorization: Bearer header
-2. API key via X-Session-API-Key header (matches agent-server convention,
+Supports four authentication methods (checked in order):
+1. Trusted identity assertion forwarded by an authenticated ingress
+2. API key via Authorization: Bearer header
+3. API key via X-Session-API-Key header (matches agent-server convention,
    useful behind reverse proxies that overwrite the Authorization header)
-3. Cookie: the OpenHands web UI session cookie, either the new OAuth v2
+4. Cookie: the OpenHands web UI session cookie, either the new OAuth v2
    ``openhands_auth`` JWT cookie or the legacy ``keycloak_auth`` cookie
 
-All methods validate against the OpenHands API GET /api/v1/users/me endpoint
-to get the user and organization identity.
+Trusted ingress identity is validated locally and authorized through Sandbox
+Server's organization membership endpoint. Other methods validate against the
+OpenHands API GET /api/v1/users/me endpoint.
 """
 
 import hashlib
@@ -19,6 +21,7 @@ from enum import StrEnum
 from typing import Any
 
 import httpx
+import jwt
 from cachetools import TTLCache
 from fastapi import Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
@@ -48,6 +51,7 @@ _auth_cache: TTLCache[str, "AuthenticatedUser"] | None = None
 # chunked, but we reassemble either name defensively.
 SESSION_COOKIE_NAMES = ("openhands_auth", "keycloak_auth")
 X_ORG_ID_HEADER = "X-Org-Id"
+TRUSTED_IDENTITY_NAMESPACE = uuid.UUID("7aa6df4c-9243-4bad-8933-7863e0412d5c")
 # Keep parity with OpenHands' cookie chunking helper: 8 * 3000 bytes is
 # comfortably above expected session token sizes while staying bounded.
 MAX_SESSION_COOKIE_CHUNKS = 8
@@ -81,6 +85,7 @@ class AuthMethod(StrEnum):
     API_KEY = "api_key"
     COOKIE = "cookie"
     LOCAL_API_KEY = "local_api_key"
+    TRUSTED_IDENTITY = "trusted_identity"
 
 
 def create_http_client() -> httpx.AsyncClient:
@@ -114,6 +119,9 @@ class AuthenticatedUser:
     api_key: str | None = None  # Set when auth_method == API_KEY
     model_profile_names: frozenset[str] | None = None
     active_model_profile_name: str | None = None
+    identity_provider: str | None = None
+    identity_tenant_id: str | None = None
+    identity_subject_id: str | None = None
 
 
 def _store_authenticated_user(
@@ -187,6 +195,85 @@ class _UsersMe(BaseModel):
         # Secondary metadata: anything that is not a JSON object is treated as
         # absent so a shape change here can never break authentication.
         return v if isinstance(v, dict) else None
+
+
+class _OrganizationMembership(BaseModel):
+    """Consuming subset of Sandbox Server's organization membership response."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    org_id: uuid.UUID
+    user_id: uuid.UUID
+    role: str
+    permissions: list[str]
+
+
+def _trusted_identity_user_id(
+    provider: str, tenant_id: str, subject_id: str
+) -> uuid.UUID:
+    """Stable Automation-local owner id for one immutable external identity."""
+    return uuid.uuid5(
+        TRUSTED_IDENTITY_NAMESPACE,
+        "\0".join((provider, tenant_id, subject_id)),
+    )
+
+
+def _decode_trusted_identity_assertion(
+    assertion: str,
+) -> tuple[str, str, str]:
+    """Validate the ingress assertion and return provider, tenant, subject."""
+    settings = get_config().service
+    if not settings.trusted_identity_assertions_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Trusted identity authentication is not configured",
+        )
+
+    try:
+        header = jwt.get_unverified_header(assertion)
+        if header.get("alg") != "HS256" or header.get("typ") != "JWT":
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid trusted identity assertion",
+            )
+        claims = jwt.decode(
+            assertion,
+            settings.trusted_identity_assertion_secret,
+            algorithms=["HS256"],
+            issuer=settings.trusted_identity_assertion_issuer,
+            audience=settings.trusted_identity_assertion_audience,
+            leeway=settings.trusted_identity_assertion_clock_skew_seconds,
+            options={"require": ["oid", "tid", "sub", "iss", "aud", "iat", "exp"]},
+        )
+    except HTTPException:
+        raise
+    except jwt.PyJWTError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid trusted identity assertion",
+        ) from e
+
+    subject_id = claims.get("oid")
+    tenant_id = claims.get("tid")
+    issued_at = claims.get("iat")
+    expires_at = claims.get("exp")
+    if (
+        not isinstance(subject_id, str)
+        or not subject_id.strip()
+        or not isinstance(tenant_id, str)
+        or not tenant_id.strip()
+        or claims.get("sub") != subject_id
+        or not isinstance(issued_at, (int, float))
+        or not isinstance(expires_at, (int, float))
+        or expires_at <= issued_at
+        or expires_at - issued_at
+        > settings.trusted_identity_assertion_max_lifetime_seconds
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid trusted identity assertion",
+        )
+    return "entra", tenant_id, subject_id
 
 
 def clear_auth_cache() -> None:
@@ -426,6 +513,14 @@ def _upstream_headers(
 
 def upstream_auth_headers(request: Request) -> dict[str, str]:
     """Headers that carry the caller's own credential to the OpenHands API."""
+    settings = get_config().service
+    assertion = request.headers.get(settings.trusted_identity_assertion_header, "")
+    if assertion:
+        _decode_trusted_identity_assertion(assertion)
+        headers = {settings.trusted_identity_assertion_header: assertion}
+        if x_org_id := _extract_x_org_id(request):
+            headers[X_ORG_ID_HEADER] = x_org_id
+        return headers
     credential, auth_method = _extract_credential(request)
     return _upstream_headers(credential, auth_method, _extract_x_org_id(request))
 
@@ -483,15 +578,108 @@ async def authenticate_request(
     request: Request,
     client: httpx.AsyncClient = Depends(get_http_client),
 ) -> AuthenticatedUser:
-    """Authenticate via API key (Bearer / X-Session-API-Key) or cookie.
+    """Authenticate via trusted ingress identity, API key, or cookie.
 
     Local mode: only the configured ``local_api_key`` is accepted;
-    SaaS validation is skipped entirely.
+    SaaS validation is skipped entirely unless an authenticated ingress supplies
+    a trusted identity assertion. In that case Sandbox Server remains the
+    authority for assertion validation, identity mapping, and org permissions.
 
     SaaS mode: credentials are verified against ``GET /api/v1/users/me``
     with retry + in-memory caching.
     """
     settings = get_config().service
+
+    # --- Trusted ingress identity ---
+    assertion = request.headers.get(settings.trusted_identity_assertion_header, "")
+    if assertion:
+        identity_provider, tenant_id, subject_id = _decode_trusted_identity_assertion(
+            assertion
+        )
+        x_org_id = _extract_x_org_id(request)
+        if x_org_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"{X_ORG_ID_HEADER} is required with a trusted identity assertion"
+                ),
+            )
+
+        cache_key = _credential_cache_key(
+            assertion, AuthMethod.TRUSTED_IDENTITY, x_org_id
+        )
+        auth_cache = _get_auth_cache()
+        if cached_user := auth_cache.get(cache_key):
+            return _store_authenticated_user(request, cached_user)
+
+        headers = {
+            settings.trusted_identity_assertion_header: assertion,
+            X_ORG_ID_HEADER: x_org_id,
+        }
+        try:
+            resp = await _make_auth_request_with_retry(
+                client,
+                f"{settings.openhands_api_base_url}/api/organizations/{x_org_id}/me",
+                headers=headers,
+            )
+        except httpx.RequestError as e:
+            logger.error("Failed to reach trusted identity authority: %s", e)
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Failed to reach trusted identity authority",
+            ) from e
+
+        if resp.status_code == 401:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid trusted identity assertion",
+            )
+        if resp.status_code == 403:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized for requested organization",
+            )
+        if resp.status_code == 429:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Rate limited by trusted identity authority",
+            )
+        if resp.status_code != 200:
+            logger.error(
+                "Unexpected status from trusted identity authority: %s",
+                resp.status_code,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Unexpected response from trusted identity authority",
+            )
+
+        try:
+            membership = _OrganizationMembership.model_validate(resp.json())
+        except ValidationError as e:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Unexpected response shape from trusted identity authority",
+            ) from e
+        if str(membership.org_id) != x_org_id:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Trusted identity authority returned the wrong organization",
+            )
+
+        user = AuthenticatedUser(
+            user_id=_trusted_identity_user_id(identity_provider, tenant_id, subject_id),
+            org_id=membership.org_id,
+            email="",
+            role=membership.role,
+            permissions=membership.permissions,
+            auth_method=AuthMethod.TRUSTED_IDENTITY,
+            identity_provider=identity_provider,
+            identity_tenant_id=tenant_id,
+            identity_subject_id=subject_id,
+        )
+        auth_cache[cache_key] = user
+        return _store_authenticated_user(request, user)
 
     # --- Local-mode fast path (no network call) ---
     api_key = _extract_api_key(request)

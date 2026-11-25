@@ -134,6 +134,17 @@ class Automation(Base):
         default=AutomationRunAsKind.USER,
         server_default=AutomationRunAsKind.USER.name,  # ORM stores member names
     )
+    # Immutable external identity used to mint managed-execution credentials.
+    # NULL for legacy/local owners and service-account run-as identities.
+    run_as_identity_provider: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )
+    run_as_identity_tenant_id: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )
+    run_as_identity_subject_id: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )
     # The person who created the automation. Set once on create; a run-as
     # change keeps it. Every create path sets it; the default (the run-as user)
     # is right for an automation created to run as its creator.
@@ -1157,6 +1168,15 @@ class AutomationGitSyncOrgConfig(Base):
     # this user: an automation runs as its owner, and in cloud mode that means
     # minting the owner's API key, so it has to be a real member of the org.
     configured_by_user_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+    configured_by_identity_provider: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )
+    configured_by_identity_tenant_id: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )
+    configured_by_identity_subject_id: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )
 
     last_synced_commit: Mapped[str | None] = mapped_column(String(64), nullable=True)
     last_synced_path: Mapped[str | None] = mapped_column(String(255), nullable=True)

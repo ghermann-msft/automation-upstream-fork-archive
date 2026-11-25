@@ -659,6 +659,9 @@ async def _materialize_draft(
             id=uuid.uuid4(),
             user_id=run_as.user_id,
             run_as_kind=run_as.kind,
+            run_as_identity_provider=run_as.identity_provider,
+            run_as_identity_tenant_id=run_as.identity_tenant_id,
+            run_as_identity_subject_id=run_as.identity_subject_id,
             created_by_user_id=user.user_id,
             org_id=user.org_id,
             telemetry_distinct_id=get_request_telemetry_context(
@@ -671,6 +674,9 @@ async def _materialize_draft(
     else:
         for field, value in values.items():
             setattr(automation, field, value)
+        automation.run_as_identity_provider = run_as.identity_provider
+        automation.run_as_identity_tenant_id = run_as.identity_tenant_id
+        automation.run_as_identity_subject_id = run_as.identity_subject_id
     await session.flush()
     await mark_git_sync_dirty(session, automation)
     return automation
