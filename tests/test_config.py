@@ -263,6 +263,36 @@ class TestLocalModeSettings:
         settings = Settings()
         assert settings.agent_server_url == ""
 
+    def test_execution_backend_auto_preserves_current_behavior(self):
+        assert Settings().uses_local_execution is False
+        assert (
+            Settings(agent_server_url="http://localhost:3000").uses_local_execution
+            is True
+        )
+
+    def test_managed_execution_is_independent_of_local_auth_mode(self):
+        settings = Settings(
+            agent_server_url="http://localhost:3000",
+            local_api_key="trusted-local-key",
+            execution_backend="managed",
+        )
+
+        assert settings.is_local_mode is True
+        assert settings.uses_local_execution is False
+
+    def test_local_execution_can_be_selected_explicitly(self):
+        settings = Settings(
+            agent_server_url="http://localhost:3000",
+            execution_backend="local",
+        )
+
+        assert settings.is_local_mode is True
+        assert settings.uses_local_execution is True
+
+    def test_local_execution_requires_an_agent_server(self):
+        with pytest.raises(ValueError, match="agent_server_url is required"):
+            Settings(execution_backend="local")
+
     def test_agent_server_api_key_default(self):
         """agent_server_api_key defaults to empty string."""
         settings = Settings()

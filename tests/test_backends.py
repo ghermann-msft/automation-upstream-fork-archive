@@ -400,6 +400,41 @@ class TestCloudSandboxBackend:
         )
 
     @pytest.mark.asyncio
+    async def test_create_sandbox_passes_execution_profile(self, mock_run):
+        execution_profile_id = uuid.uuid4()
+        seen_query = None
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal seen_query
+            seen_query = request.url.query.decode()
+            return httpx.Response(200, json={"id": "sb1"})
+
+        backend = CloudSandboxBackend(
+            api_url="https://app.test",
+            run=mock_run,
+            execution_profile_id=execution_profile_id,
+        )
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            assert await backend._create_sandbox(client, {}) == "sb1"
+
+        assert seen_query == f"sandbox_spec_id={execution_profile_id}"
+
+    @pytest.mark.asyncio
+    async def test_create_sandbox_omits_execution_profile_when_unset(self, mock_run):
+        seen_query = None
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal seen_query
+            seen_query = request.url.query.decode()
+            return httpx.Response(200, json={"id": "sb1"})
+
+        backend = CloudSandboxBackend(api_url="https://app.test", run=mock_run)
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            assert await backend._create_sandbox(client, {}) == "sb1"
+
+        assert seen_query == ""
+
+    @pytest.mark.asyncio
     async def test_get_api_key_mints_per_user_key(self, mock_run):
         """get_api_key() mints a per-user key via service key."""
         backend = CloudSandboxBackend(api_url="https://app.all-hands.dev", run=mock_run)
@@ -532,6 +567,21 @@ class TestGetBackend:
         assert isinstance(backend, LocalAgentServerBackend)
         assert backend.agent_server_url == "http://localhost:3000"
         assert backend.api_key == "local-key"
+
+    def test_managed_mode_with_local_auth(self, monkeypatch, mock_run):
+        execution_profile_id = uuid.uuid4()
+        mock_run.automation.execution_profile_id = execution_profile_id
+        monkeypatch.setenv("AUTOMATION_AGENT_SERVER_URL", "http://localhost:3000")
+        monkeypatch.setenv("AUTOMATION_EXECUTION_BACKEND", "managed")
+        monkeypatch.setenv(
+            "AUTOMATION_OPENHANDS_API_BASE_URL", "https://app.all-hands.dev"
+        )
+        clear_config_cache()
+
+        backend = get_backend(mock_run)
+
+        assert isinstance(backend, CloudSandboxBackend)
+        assert backend.execution_profile_id == execution_profile_id
 
     def test_cloud_mode(self, monkeypatch, mock_run):
         """get_backend returns CloudSandboxBackend when not in local mode."""

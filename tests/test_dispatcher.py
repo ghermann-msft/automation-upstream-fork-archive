@@ -57,6 +57,7 @@ from openhands.automation.utils.run import (
     mark_run_terminal,
     requeue_deferred_run,
     update_run_current_phase,
+    update_run_execution_ids,
     update_run_timeout_at,
 )
 from openhands.automation.utils.tarball_validation import is_http_url
@@ -626,6 +627,87 @@ class TestUpdateRunTimeoutAt:
         async with async_session_factory() as session:
             updated = await session.get(AutomationRun, run_id)
             assert updated.timeout_at == original_timeout_at
+
+
+class TestUpdateRunExecutionIds:
+    async def test_persists_managed_execution_identity_atomically(
+        self, async_session_factory
+    ):
+        sandbox_id = "sandbox-managed"
+        bash_command_id = "command-managed"
+        async with async_session_factory() as session:
+            automation = Automation(
+                user_id=TEST_USER_ID,
+                org_id=TEST_ORG_ID,
+                name="Test",
+                trigger={"type": "cron", "schedule": "* * * * *", "timezone": "UTC"},
+                tarball_path="s3://bucket/code.tar.gz",
+                entrypoint="uv run main.py",
+                enabled=True,
+            )
+            session.add(automation)
+            await session.flush()
+            run = AutomationRun(
+                automation_id=automation.id,
+                status=AutomationRunStatus.RUNNING,
+                started_at=utcnow(),
+                timeout_at=utcnow() + timedelta(minutes=5),
+            )
+            session.add(run)
+            await session.commit()
+            run_id = run.id
+
+        assert await update_run_execution_ids(
+            async_session_factory,
+            run_id,
+            sandbox_id=sandbox_id,
+            bash_command_id=bash_command_id,
+        )
+
+        async with async_session_factory() as session:
+            updated = await session.get(AutomationRun, run_id)
+            assert updated is not None
+            assert updated.sandbox_id == sandbox_id
+            assert updated.bash_command_id == bash_command_id
+
+    async def test_refuses_to_attach_execution_identity_to_terminal_run(
+        self, async_session_factory
+    ):
+        async with async_session_factory() as session:
+            automation = Automation(
+                user_id=TEST_USER_ID,
+                org_id=TEST_ORG_ID,
+                name="Test",
+                trigger={"type": "cron", "schedule": "* * * * *", "timezone": "UTC"},
+                tarball_path="s3://bucket/code.tar.gz",
+                entrypoint="uv run main.py",
+                enabled=True,
+            )
+            session.add(automation)
+            await session.flush()
+            run = AutomationRun(
+                automation_id=automation.id,
+                status=AutomationRunStatus.CANCELLED,
+                started_at=utcnow(),
+                completed_at=utcnow(),
+                timeout_at=utcnow() + timedelta(minutes=5),
+            )
+            session.add(run)
+            await session.commit()
+            run_id = run.id
+
+        assert not await update_run_execution_ids(
+            async_session_factory,
+            run_id,
+            sandbox_id="sandbox-late",
+            bash_command_id="command-late",
+        )
+
+        async with async_session_factory() as session:
+            updated = await session.get(AutomationRun, run_id)
+            assert updated is not None
+            assert updated.sandbox_id is None
+            assert updated.bash_command_id is None
 
 
 class TestUpdateRunCurrentPhase:

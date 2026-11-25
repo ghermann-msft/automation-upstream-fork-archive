@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 import re
+import uuid
 from collections.abc import Awaitable, Callable, Collection
 from typing import TYPE_CHECKING, Any, TypeVar
 
@@ -222,7 +223,12 @@ class CloudSandboxBackend(ExecutionBackend):
     error occurs (401/403), the key is refreshed and the operation retried.
     """
 
-    def __init__(self, api_url: str, run: AutomationRun):
+    def __init__(
+        self,
+        api_url: str,
+        run: AutomationRun,
+        execution_profile_id: uuid.UUID | None = None,
+    ):
         """Initialize the Cloud sandbox backend for a specific run.
 
         Args:
@@ -231,6 +237,7 @@ class CloudSandboxBackend(ExecutionBackend):
         """
         self.api_url = api_url.rstrip("/")
         self._run = run
+        self.execution_profile_id = execution_profile_id
         self._api_key: str | None = None  # Lazily minted
 
         # Load sandbox config for retry/timeout settings
@@ -669,8 +676,13 @@ class CloudSandboxBackend(ExecutionBackend):
 
         @self._retry
         async def _do_create():
+            params = (
+                {"sandbox_spec_id": str(self.execution_profile_id)}
+                if self.execution_profile_id
+                else None
+            )
             resp = await client.post(
-                f"{self.api_url}/api/v1/sandboxes", headers=headers
+                f"{self.api_url}/api/v1/sandboxes", headers=headers, params=params
             )
             # A concurrency-limit 429 is not transient: retrying won't free a
             # slot. Raise a non-HTTPStatusError so the retry predicate skips it

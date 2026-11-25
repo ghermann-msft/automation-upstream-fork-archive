@@ -218,6 +218,10 @@ class CreatePromptAutomationRequest(BaseModel):
             "cannot be combined with 'model'."
         ),
     )
+    execution_profile_id: uuid.UUID | None = Field(
+        default=None,
+        description="Sandbox execution profile selected for this automation.",
+    )
 
     name: str = Field(..., min_length=1, max_length=500)
     factory_id: uuid.UUID | None = Field(
@@ -784,6 +788,7 @@ async def create_automation_from_prompt(
             preset_metadata=preset_metadata,
             model=model,
             agent_profile_id=body.agent_profile_id,
+            execution_profile_id=body.execution_profile_id,
             trigger=body.trigger.model_dump(),
             observability_associations=body.observability_associations,
             outcome_parsers=[parser.model_dump() for parser in body.outcome_parsers]
@@ -884,6 +889,10 @@ class CreatePluginAutomationRequest(BaseModel):
             "Agent profile the runs launch from. It owns the model, so it "
             "cannot be combined with 'model'."
         ),
+    )
+    execution_profile_id: uuid.UUID | None = Field(
+        default=None,
+        description="Sandbox execution profile selected for this automation.",
     )
 
     name: str = Field(..., min_length=1, max_length=500)
@@ -1369,6 +1378,7 @@ async def create_automation_from_plugin(
             preset_metadata=preset_metadata,
             model=model,
             agent_profile_id=body.agent_profile_id,
+            execution_profile_id=body.execution_profile_id,
             trigger=body.trigger.model_dump(),
             observability_associations=body.observability_associations,
             outcome_parsers=[parser.model_dump() for parser in body.outcome_parsers]

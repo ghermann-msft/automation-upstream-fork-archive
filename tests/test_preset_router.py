@@ -2221,6 +2221,21 @@ class TestCreateAutomationFromPrompt:
         assert response.json()["model"] is None
         assert len(agent_profiles_api.requests) == 1
 
+    async def test_create_from_prompt_with_an_execution_profile(self, async_client):
+        execution_profile_id = uuid.uuid4()
+        response = await async_client.post(
+            "/api/automation/v1/preset/prompt",
+            json={
+                "name": "Isolated",
+                "prompt": "Do something",
+                "trigger": {"type": "cron", "schedule": "0 9 * * 1"},
+                "execution_profile_id": str(execution_profile_id),
+            },
+        )
+
+        assert response.status_code == 201
+        assert response.json()["execution_profile_id"] == str(execution_profile_id)
+
     async def test_create_from_prompt_rejects_an_unknown_agent_profile(
         self, async_client, agent_profiles_api, mock_file_store
     ):
@@ -3057,8 +3072,10 @@ class TestCreateAutomationFromPlugin:
         self, async_client, async_session, mock_file_store
     ):
         """Valid request creates automation and upload, returns 201."""
+        execution_profile_id = uuid.uuid4()
         payload = {
             "name": "My Plugin Automation",
+            "execution_profile_id": str(execution_profile_id),
             "plugins": [
                 {"source": "github:owner/code-review-plugin", "ref": "v1.0.0"},
                 {"source": "github:owner/security-plugin"},
@@ -3081,6 +3098,7 @@ class TestCreateAutomationFromPlugin:
         assert data["setup_script_path"] == "setup.sh"
         assert data["tarball_path"].startswith("oh-internal://uploads/")
         assert data["enabled"] is True
+        assert data["execution_profile_id"] == str(execution_profile_id)
         assert "id" in data
         assert data["user_id"] == str(TEST_USER_ID)
 

@@ -102,11 +102,10 @@ from openhands.automation.utils.run import (
     mark_run_terminal,
     requeue_deferred_run,
     run_is_running,
-    update_bash_command_id,
     update_run_current_phase,
+    update_run_execution_ids,
     update_run_resolved_runtime,
     update_run_timeout_at,
-    update_sandbox_id,
 )
 from openhands.automation.utils.run_status_detail import (
     RunStatusDetailKind,
@@ -771,13 +770,27 @@ async def _acquire_execution_context(
             await asyncio.sleep(delay)
             attempt += 1
 
-    if not await run_is_running(session_factory, run.id):
+    if ctx.sandbox_id:
+        try:
+            still_running = await update_run_execution_ids(
+                session_factory,
+                run.id,
+                sandbox_id=ctx.sandbox_id,
+                bash_command_id=None,
+            )
+        except Exception:
+            await backend.release_context(client, ctx)
+            raise
+    else:
+        still_running = await run_is_running(session_factory, run.id)
+    if not still_running:
         logger.info(
             "Run no longer RUNNING after provisioning; releasing sandbox",
             extra=log_ctx,
         )
         await backend.release_context(client, ctx)
         return None
+    run.sandbox_id = ctx.sandbox_id
     return ctx
 
 
@@ -1281,7 +1294,7 @@ async def _execute_run(
     callback_url = f"{settings.resolved_base_url.rstrip('/')}/v1/runs/{run_id}/complete"
     env_vars = backend.build_env_vars()
     env_vars.update(automation_env_metadata(automation, run))
-    if backend.is_local_mode:
+    if settings.is_local_mode:
         # Every local installation owns its rows as the same placeholder user
         # (auth._get_local_user), so attribute conversations to the
         # installation instead; never forward the shared placeholder.
@@ -1368,9 +1381,13 @@ async def _execute_run(
     )
 
     # A run of a factory's automation gets a token naming its factory. Local
-    # mode has no OpenHands server to verify the token, and without the service
-    # key there is nothing to sign it with. The run starts either way.
-    if automation.factory_id and settings.service_key and not settings.is_local_mode:
+    # execution has no OpenHands server to verify the token, and without the
+    # service key there is nothing to sign it with. The run starts either way.
+    if (
+        automation.factory_id
+        and settings.service_key
+        and not settings.uses_local_execution
+    ):
         env_vars["AUTOMATION_FACTORY_TOKEN"] = create_factory_token(
             settings.service_key,
             org_id=automation.org_id,
@@ -1685,6 +1702,38 @@ async def _execute_run(
 
     # 8. Handle result
     if result.success:
+        try:
+            still_running = await update_run_execution_ids(
+                session_factory,
+                run.id,
+                sandbox_id=ctx.sandbox_id,
+                bash_command_id=result.bash_command_id,
+            )
+        except Exception as exc:
+            logger.exception(
+                "Failed to persist execution identity",
+                extra=_log_ctx(sandbox_id=ctx.sandbox_id),
+            )
+            if result.bash_command_id:
+                await backend.stop_command(result.bash_command_id)
+            await backend.release_context(client, ctx)
+            await _fail(
+                "Failed to persist execution identity",
+                status_detail=run_status_detail_from_exception(
+                    exc,
+                    phase=RunStatusPhase.DISPATCH,
+                    source="automation_service",
+                    operation="persist_execution_identity",
+                ),
+            )
+            return
+        if not still_running:
+            if result.bash_command_id:
+                await backend.stop_command(result.bash_command_id)
+            await backend.release_context(client, ctx)
+            return
+        run.sandbox_id = ctx.sandbox_id
+        run.bash_command_id = result.bash_command_id
         add_event(
             "automation.entrypoint.start",
             automation_attributes(
@@ -1697,15 +1746,6 @@ async def _execute_run(
             ),
         )
         await update_run_current_phase(session_factory, run.id, "Starting automation")
-        if ctx.sandbox_id:
-            await update_sandbox_id(session_factory, run.id, ctx.sandbox_id)
-        if result.bash_command_id:
-            # Persist the BashCommand id so the verifier can filter
-            # BashOutput events by exactly this command (avoids
-            # cross-command contamination on a shared agent server).
-            await update_bash_command_id(
-                session_factory, run.id, result.bash_command_id
-            )
         # Phase-2 deadline: the bash command has started, so its own timeout
         # (enforced by the agent-server from bash start) now governs the run.
         # Align the watchdog deadline with it, plus margin so the bash

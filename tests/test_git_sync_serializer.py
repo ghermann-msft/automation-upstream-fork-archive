@@ -451,3 +451,17 @@ def test_profile_reference_survives_git_round_trip():
     restored = deserialize_automation(serialize_automation(automation, None))
     assert restored is not None
     assert restored.fields["agent_profile_id"] == str(selected)
+
+
+def test_execution_profile_reference_survives_git_round_trip():
+    selected = uuid.uuid4()
+    automation = _make_automation(execution_profile_id=selected)
+    restored = deserialize_automation(serialize_automation(automation, None))
+    assert restored is not None
+    assert restored.fields["execution_profile_id"] == str(selected)
+
+
+def test_unset_execution_profile_is_omitted_from_git_metadata():
+    files = serialize_automation(_make_automation(execution_profile_id=None), None)
+
+    assert b"execution_profile_id" not in files["automation.yaml"]

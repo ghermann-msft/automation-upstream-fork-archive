@@ -171,6 +171,9 @@ class Automation(Base):
     # Profile IDs belong to the configured Agent Server, not to this database.
     agent_profile_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
 
+    # Sandbox execution profile (Sandbox Server sandbox_spec_id).
+    execution_profile_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True)
+
     # Executable plugin-backed automation spec. When set, the dispatcher fetches
     # the plugin source at run time and packages it as the run tarball.
     plugin_spec: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)

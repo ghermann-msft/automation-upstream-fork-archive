@@ -324,53 +324,33 @@ async def mark_run_status(
     run.status = status
 
 
-async def update_sandbox_id(
+async def update_run_execution_ids(
     session_factory: async_sessionmaker[AsyncSession],
     run_id: uuid.UUID,
-    sandbox_id: str,
-) -> None:
-    """Store the sandbox ID on the automation run for later verification.
+    *,
+    sandbox_id: str | None,
+    bash_command_id: str | None,
+) -> bool:
+    """Persist the execution identity while the run is still RUNNING.
 
-    Args:
-        session_factory: Async session factory
-        run_id: The run ID to update
-        sandbox_id: The sandbox ID to store
+    Both identifiers are written in one guarded transaction so a managed run
+    can never persist a command without the sandbox that owns it. ``False``
+    means a callback, cancellation, or watchdog won the race.
     """
-    try:
-        async with session_factory() as session:
-            await session.execute(
-                update(AutomationRun)
-                .where(AutomationRun.id == run_id)
-                .values(sandbox_id=sandbox_id)
+    async with session_factory() as session:
+        result = await session.execute(
+            update(AutomationRun)
+            .where(
+                AutomationRun.id == run_id,
+                AutomationRun.status == AutomationRunStatus.RUNNING,
             )
-            await session.commit()
-    except Exception:
-        logger.exception("Failed to update sandbox_id for run %s", run_id)
-
-
-async def update_bash_command_id(
-    session_factory: async_sessionmaker[AsyncSession],
-    run_id: uuid.UUID,
-    bash_command_id: str,
-) -> None:
-    """Store the agent-server BashCommand id on the automation run.
-
-    The verifier reads this back later to filter BashOutput events by exactly
-    this command, so it doesn't pick up output from concurrent bash activity
-    on a shared agent server. Failure to record this is non-fatal — the run
-    will still execute — but verification may fall back to the (buggy)
-    most-recent-output behavior, which is what we're trying to avoid.
-    """
-    try:
-        async with session_factory() as session:
-            await session.execute(
-                update(AutomationRun)
-                .where(AutomationRun.id == run_id)
-                .values(bash_command_id=bash_command_id)
+            .values(
+                sandbox_id=sandbox_id,
+                bash_command_id=bash_command_id,
             )
-            await session.commit()
-    except Exception:
-        logger.exception("Failed to update bash_command_id for run %s", run_id)
+        )
+        await session.commit()
+        return bool(result.rowcount)
 
 
 async def update_run_resolved_runtime(

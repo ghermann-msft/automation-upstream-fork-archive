@@ -163,6 +163,8 @@ def _automation_yaml_fields(
     # existing automation on the first sync cycle.
     if automation.description is not None:
         fields["description"] = automation.description
+    if automation.execution_profile_id is not None:
+        fields["execution_profile_id"] = str(automation.execution_profile_id)
     # Omitted when nothing is executable, so upgrading doesn't rewrite every
     # already-synced automation.yaml just to add an empty list.
     if tarball_executables:

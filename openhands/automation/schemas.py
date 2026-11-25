@@ -606,6 +606,10 @@ class CreateAutomationRequest(BaseModel):
         default=None,
         description="Agent profile selected for this automation.",
     )
+    execution_profile_id: uuid.UUID | None = Field(
+        default=None,
+        description="Sandbox execution profile selected for this automation.",
+    )
 
     name: str = Field(..., min_length=1, max_length=500)
     description: str | None = Field(default=None, max_length=2000)
@@ -809,6 +813,10 @@ class UpdateAutomationRequest(BaseModel):
     agent_profile_id: uuid.UUID | None = Field(
         default=None,
         description="Agent profile selected for this automation.",
+    )
+    execution_profile_id: uuid.UUID | None = Field(
+        default=None,
+        description="Sandbox execution profile selected for this automation.",
     )
     visibility: AutomationVisibility | None = Field(
         default=None, description=VISIBILITY_DESCRIPTION
@@ -1350,6 +1358,7 @@ class TelemetryConsentResponse(BaseModel):
 
 class AutomationResponse(BaseModel):
     agent_profile_id: uuid.UUID | None = None
+    execution_profile_id: uuid.UUID | None = None
     id: uuid.UUID
     user_id: uuid.UUID
     run_as_kind: AutomationRunAsKind = AutomationRunAsKind.USER

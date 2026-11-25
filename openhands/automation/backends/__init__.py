@@ -48,7 +48,7 @@ def get_backend(run: AutomationRun) -> ExecutionBackend:
     config = get_config()
     settings = config.service
 
-    if settings.is_local_mode:
+    if settings.uses_local_execution:
         return LocalAgentServerBackend(
             agent_server_url=settings.agent_server_url,
             api_key=settings.agent_server_api_key,
@@ -61,6 +61,7 @@ def get_backend(run: AutomationRun) -> ExecutionBackend:
         return CloudSandboxBackend(
             api_url=settings.openhands_api_base_url,
             run=run,
+            execution_profile_id=run.automation.execution_profile_id,
         )
 
 

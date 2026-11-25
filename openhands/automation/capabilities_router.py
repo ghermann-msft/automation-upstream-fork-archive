@@ -75,6 +75,8 @@ _STATIC_FEATURES = (
     "conversationDispatch",
     # Can run a client-supplied tarball, so an entry may ship a script bundle.
     "customTarball",
+    # A selected profile is passed to Sandbox Server as sandbox_spec_id.
+    "executionProfiles",
     # Factories can be created, and automations created in or moved into one.
     "factories",
     "mcpTools",
@@ -105,10 +107,9 @@ async def get_capabilities(
     """
     config = get_config()
 
-    # In cloud mode every run needs a minted API key, which needs the service
-    # key. Without it the service accepts work it cannot execute, so it offers
-    # nothing rather than letting a setup form proceed into certain failure.
-    if not (config.service.is_local_mode or config.service.service_key):
+    # Managed execution needs a minted API key, which needs the service key,
+    # even when inbound requests use trusted local authentication.
+    if not (config.service.uses_local_execution or config.service.service_key):
         return CapabilitiesResponse(
             ready=False,
             max_automation_timeout_seconds=config.sandbox.max_run_duration,

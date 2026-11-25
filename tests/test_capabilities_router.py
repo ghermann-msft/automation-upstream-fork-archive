@@ -215,6 +215,7 @@ class TestGetCapabilities:
         assert "webhookDelivery" in body["features"]
         assert "kvStore" in body["features"]
         assert "customTarball" in body["features"]
+        assert "executionProfiles" in body["features"]
         assert "factories" in body["features"]
         assert "outcomes" in body["features"]
         assert "automationDescription" in body["features"]
@@ -365,6 +366,18 @@ class TestGetCapabilities:
         assert body["features"] == []
         assert body["repoProviders"] == []
         assert body["triggers"] == {}
+
+    async def test_managed_execution_with_local_auth_still_requires_service_key(
+        self, async_client, monkeypatch
+    ):
+        monkeypatch.setenv("AUTOMATION_SERVICE_KEY", "")
+        monkeypatch.setenv("AUTOMATION_AGENT_SERVER_URL", "http://localhost:3000")
+        monkeypatch.setenv("AUTOMATION_EXECUTION_BACKEND", "managed")
+        clear_config_cache()
+
+        response = await async_client.get(CAPABILITIES_URL)
+
+        assert response.json()["ready"] is False
 
     async def test_advertised_cron_floor_follows_the_scheduler_interval(
         self, async_client, ready_deployment, monkeypatch

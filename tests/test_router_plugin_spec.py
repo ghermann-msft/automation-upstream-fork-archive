@@ -160,6 +160,7 @@ async def test_create_plugin_spec_automation(
     async_client, tmp_path, agent_profiles_api
 ):
     plugin = write_plugin(tmp_path)
+    execution_profile_id = uuid.uuid4()
 
     response = await async_client.post(
         "/api/automation/v1/plugin-spec",
@@ -168,6 +169,7 @@ async def test_create_plugin_spec_automation(
             "plugin": {"source": str(plugin)},
             "trigger": {"type": "cron", "schedule": "0 9 * * *"},
             "config": {"message": "hi"},
+            "execution_profile_id": str(execution_profile_id),
         },
         headers=agent_profiles_api.caller_auth,
     )
@@ -184,6 +186,7 @@ async def test_create_plugin_spec_automation(
         "config": {"message": "hi"},
     }
     assert data["agent_profile_id"] == agent_profiles_api.profile_id
+    assert data["execution_profile_id"] == str(execution_profile_id)
     assert data["model"] is None
 
 

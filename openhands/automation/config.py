@@ -646,14 +646,11 @@ class ServiceSettings(BaseSettings):
     # If pool exhaustion is frequent, increase pool_size rather than this timeout.
     db_pool_timeout: float = 30
 
-    # Local agent-server mode (self-hosted deployments)
-    # When agent_server_url is set, the service operates in "local mode":
-    # - Uses a persistent local agent server instead of cloud sandboxes
-    # - Skips per-user API key minting (uses agent_server_api_key instead)
-    # - Supports SQLite database via db_url
-    # - Authenticates using local_api_key instead of OpenHands SaaS API
+    # Local deployment/auth mode (self-hosted deployments). Run execution is
+    # selected independently by execution_backend.
     agent_server_url: str = ""
     agent_server_api_key: str = ""
+    execution_backend: Literal["auto", "local", "managed"] = "auto"
     # Optional override for the AGENT_SERVER_URL env var exported into the
     # in-sandbox bash chain by LocalAgentServerBackend.build_env_vars.
     # When empty, defaults to agent_server_url (the URL the backend itself
@@ -786,18 +783,30 @@ class ServiceSettings(BaseSettings):
         """Match migration env fallback for standard Postgres SSL variables."""
         if "db_ssl_mode" not in self.model_fields_set:
             self.db_ssl_mode = os.getenv("DB_SSL_MODE", os.getenv("PGSSLMODE", ""))
+        if self.execution_backend == "local" and not self.agent_server_url:
+            raise ValueError(
+                "agent_server_url is required when execution_backend is local"
+            )
         return self
 
     @property
     def is_local_mode(self) -> bool:
-        """Check if running in local agent-server mode.
+        """Check if running in local deployment/auth mode.
 
         Local mode is enabled when agent_server_url is configured. In this mode:
-        - Uses a persistent local agent server instead of cloud sandboxes
-        - Skips per-user API key minting
-        - No sandbox creation/deletion lifecycle
+        - Requests may authenticate with local_api_key
+        - SQLite and installation-local behavior are supported
+
+        Run execution is selected independently by ``execution_backend``.
         """
         return bool(self.agent_server_url)
+
+    @property
+    def uses_local_execution(self) -> bool:
+        """Whether runs execute on the configured persistent agent server."""
+        if self.execution_backend == "auto":
+            return self.is_local_mode
+        return self.execution_backend == "local"
 
     @property
     def base_path(self) -> str:

@@ -1020,7 +1020,7 @@ async def watchdog_loop(
         except Exception:
             logger.exception("Error pruning integration events")
 
-        if not settings.is_local_mode:
+        if not settings.uses_local_execution:
             try:
                 cleaned = await cleanup_due_sandboxes(session_factory)
                 if cleaned:
@@ -1028,7 +1028,7 @@ async def watchdog_loop(
             except Exception:
                 logger.exception("Error cleaning up deferred sandboxes")
 
-        if settings.is_local_mode and settings.workspace_retention_seconds > 0:
+        if settings.uses_local_execution and settings.workspace_retention_seconds > 0:
             try:
                 await purge_terminal_workspaces(
                     session_factory=session_factory,

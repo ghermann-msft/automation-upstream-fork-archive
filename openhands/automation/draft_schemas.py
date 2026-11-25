@@ -110,6 +110,7 @@ class _BaseDraftBody(BaseModel):
         default=None, description=VISIBILITY_DESCRIPTION
     )
     agent_profile_id: uuid.UUID | None = None
+    execution_profile_id: uuid.UUID | None = None
     name: str | None = Field(default=None, min_length=1, max_length=500)
     factory_id: uuid.UUID | None = Field(
         default=None, description=FACTORY_ID_DESCRIPTION

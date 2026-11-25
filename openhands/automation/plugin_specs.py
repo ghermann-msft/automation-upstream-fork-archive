@@ -440,6 +440,10 @@ class CreatePluginSpecAutomationRequest(BaseModel):
             "its default_name."
         ),
     )
+    execution_profile_id: uuid.UUID | None = Field(
+        default=None,
+        description="Sandbox execution profile selected for this automation.",
+    )
     observability_associations: dict[str, str] | None = None
     timeout: int | None = None
     keep_alive: bool | None = None

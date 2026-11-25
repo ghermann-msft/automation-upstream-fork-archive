@@ -1134,6 +1134,37 @@ async def test_a_draft_test_runs_with_its_agent_profile(
     assert automation.model is None
 
 
+async def test_a_draft_test_runs_with_its_execution_profile(
+    async_client, async_session, draft_file_store
+):
+    execution_profile_id = uuid.uuid4()
+    created = await async_client.post(
+        "/api/automation/v1/drafts",
+        json={
+            "endpoint": "/v1/preset/prompt",
+            "draft": {
+                "name": "Isolated draft",
+                "prompt": "Write a short greeting.",
+                "trigger": {"type": "cron", "schedule": "0 9 * * *"},
+                "execution_profile_id": str(execution_profile_id),
+            },
+        },
+    )
+    assert created.status_code == 201
+    assert created.json()["draft"]["execution_profile_id"] == str(execution_profile_id)
+
+    response = await async_client.post(
+        f"/api/automation/v1/drafts/{created.json()['id']}/dispatch"
+    )
+
+    assert response.status_code == 201
+    draft = await async_session.get(AutomationDraft, uuid.UUID(created.json()["id"]))
+    assert draft is not None
+    automation = await async_session.get(Automation, draft.materialized_automation_id)
+    assert automation is not None
+    assert automation.execution_profile_id == execution_profile_id
+
+
 @pytest.mark.parametrize(
     ("profile", "extra"),
     [

@@ -1276,6 +1276,42 @@ async def test_watchdog_sweeps_deferred_sandboxes_in_cloud_mode(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_watchdog_sweeps_managed_sandboxes_with_local_auth(monkeypatch):
+    shutdown_event = asyncio.Event()
+    calls = []
+
+    async def mark_stale(*_args):
+        calls.append("stale")
+        return 0
+
+    async def prune_events(*_args):
+        calls.append("events")
+        return 0
+
+    async def cleanup_sandboxes(*_args):
+        calls.append("sandboxes")
+        shutdown_event.set()
+        return 0
+
+    monkeypatch.setattr("openhands.automation.watchdog.mark_stale_runs", mark_stale)
+    monkeypatch.setattr(
+        "openhands.automation.watchdog.prune_integration_events", prune_events
+    )
+    monkeypatch.setattr(
+        "openhands.automation.watchdog.cleanup_due_sandboxes", cleanup_sandboxes
+    )
+
+    settings = Settings(
+        agent_server_url="http://localhost:3000",
+        execution_backend="managed",
+        watchdog_interval_seconds=60,
+    )
+    await watchdog_loop(AsyncMock(), settings, shutdown_event)
+
+    assert calls == ["stale", "events", "sandboxes"]
+
+
+@pytest.mark.asyncio
 async def test_watchdog_forwards_shutdown_event_to_workspace_purge(monkeypatch):
     """Without this the purge's own shutdown checks can never fire."""
     shutdown_event = asyncio.Event()

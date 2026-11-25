@@ -636,6 +636,11 @@ async def _validate_and_resolve_fields(
         if fields.get("agent_profile_id")
         else None
     )
+    execution_profile_id = (
+        uuid.UUID(fields["execution_profile_id"])
+        if fields.get("execution_profile_id")
+        else None
+    )
     try:
         validate_agent_profile_selection(agent_profile_id, fields.get("model"))
     except HTTPException as exc:
@@ -668,6 +673,7 @@ async def _validate_and_resolve_fields(
         "description": fields.get("description"),
         "model": fields.get("model"),
         "agent_profile_id": agent_profile_id,
+        "execution_profile_id": execution_profile_id,
         "trigger": trigger.model_dump(),
         "observability_associations": observability_associations,
         "outcome_parsers": [parser.model_dump() for parser in parsers]
